@@ -113,6 +113,9 @@ class PaperMetadata(BaseModel):
         is_heliophysics (bool): Whether this paper passed heliophysics
             domain validation. Always True for stored papers — included
             for transparency in the response.
+        url (str | None): Direct link to the paper's abstract page.
+            For arXiv papers: https://arxiv.org/abs/{arxiv_id}.
+            For DOI papers: https://doi.org/{doi}.
     """
 
     identifier: str
@@ -129,6 +132,7 @@ class PaperMetadata(BaseModel):
     source: str
     fetched_at: datetime
     is_heliophysics: bool = True
+    url: Optional[str] = None  
 
 
 class PaperLookupRequest(BaseModel):
