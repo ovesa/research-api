@@ -13,7 +13,13 @@ from app.models.paper import (
     PaperLookupRequest,
     PaperMetadata,
 )
-from app.services.database import get_paper, get_stats, list_papers, save_paper
+from app.services.database import (
+    get_paper,
+    get_stats,
+    list_papers,
+    save_paper,
+    search_papers,
+)
 from app.services.fetcher import fetch_by_arxiv, fetch_by_doi
 
 router = APIRouter(prefix="/papers", tags=["papers"])
@@ -187,6 +193,59 @@ async def list_all_papers(
         source=source,
     )
     return {
+        "papers": [p.model_dump() for p in papers],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/search",
+    summary="Full text search across heliophysics papers",
+)
+async def search(
+    q: str = Query(..., min_length=2, description="Search terms e.g. 'solar wind'"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Search stored papers by title and abstract using full text search.
+
+    Uses Postgres tsvector search with ts_rank relevance scoring.
+    Title matches rank higher than abstract matches. Results are
+    ordered by relevance score descending so best matches appear first.
+
+    Stemming is handled automatically; thus, searching 'wave' matches
+    'waves', 'wavelength', 'waving'. Searching 'magnetohydrodynamic'
+    matches 'magnetohydrodynamics'. This is significantly better than
+    a LIKE query for scientific text.
+
+    Args:
+        q (str): Search terms. Minimum 2 characters. Multi-word queries
+            like 'solar wind' are handled automatically.
+        limit (int): Number of results to return. Between 1 and 100.
+        offset (int): Number of results to skip for pagination.
+
+    Returns:
+        dict: Contains matching papers ordered by relevance, total
+            match count, the original query, limit, and offset.
+
+    Example:
+        GET /papers/search?q=solar+wind
+        GET /papers/search?q=magnetic+field&limit=5
+        GET /papers/search?q=atmospheric+gravity+waves
+    """
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Search query cannot be empty")
+
+    papers, total = await search_papers(
+        query=q.strip(),
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "query": q.strip(),
         "papers": [p.model_dump() for p in papers],
         "total": total,
         "limit": limit,

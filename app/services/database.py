@@ -203,3 +203,70 @@ def _row_to_paper(row) -> PaperMetadata:
         source=row["source"],
         fetched_at=row["fetched_at"],
     )
+
+
+async def search_papers(
+    query: str,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[PaperMetadata], int]:
+    """Search stored papers using Postgres full text search.
+
+    Uses tsvector and ts_rank to find and rank papers by relevance.
+    Title matches rank higher than abstract matches due to 'A' and 'B'
+    weights set during indexing. Results are ordered by relevance score
+    descending so the best matches appear first.
+
+    Stemming is handled automatically by Postgres: searching 'magnetohydrodynamic'
+    will match 'magnetohydrodynamics', searching 'wave' matches 'waves',
+    'waving', 'wavelength' and so on. tsvector converts raw text into a
+    searchable token list.
+
+    Args:
+        query (str): The search terms to look for. Can be multiple words.
+            e.g. 'solar wind', 'magnetic field oscillations'
+        limit (int): Maximum number of results to return. Defaults to 20.
+        offset (int): Number of results to skip for pagination.
+
+    Returns:
+        tuple[list[PaperMetadata], int]: Matching papers ordered by
+            relevance score, and the total count of matches for
+            pagination metadata.
+    """
+    pool = await get_pool()
+
+    # Convert plain query string into a Postgres tsquery
+    # plainto_tsquery handles multi-word queries
+    # e.g., 'solar wind' becomes 'solar & wind' automatically
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT *,
+                ts_rank(
+                    setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
+                    setweight(to_tsvector('english', COALESCE(abstract, '')), 'B'),
+                    plainto_tsquery('english', $1)
+                ) AS rank
+            FROM papers
+            WHERE
+                to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(abstract, ''))
+                @@ plainto_tsquery('english', $1)
+            ORDER BY rank DESC
+            LIMIT $2 OFFSET $3
+            """,
+            query,
+            limit,
+            offset,
+        )
+
+        total = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM papers
+            WHERE
+                to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(abstract, ''))
+                @@ plainto_tsquery('english', $1)
+            """,
+            query,
+        )
+
+    return [_row_to_paper(row) for row in rows], total
