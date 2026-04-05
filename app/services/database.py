@@ -47,6 +47,7 @@ async def save_paper(paper: PaperMetadata) -> None:
             paper.citation_count,
             paper.source,
             paper.fetched_at,
+            paper.url,
         )
 
 
@@ -202,6 +203,7 @@ def _row_to_paper(row) -> PaperMetadata:
         citation_count=row["citation_count"],
         source=row["source"],
         fetched_at=row["fetched_at"],
+        url=row["url"],
     )
 
 
