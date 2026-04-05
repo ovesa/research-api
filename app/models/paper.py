@@ -53,9 +53,9 @@ HELIOPHYSICS_KEYWORDS = {
     "HMI",
     "DKIST",
     "solar dynamo",
-    "inertial modes"
-    
+    "inertial modes"  
 }
+
 class IdentifierType(str, Enum):
     """The two supported paper identifier formats.
 
