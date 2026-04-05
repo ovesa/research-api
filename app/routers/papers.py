@@ -21,7 +21,13 @@ from app.services.database import (
     search_papers,
 )
 from app.services.fetcher import fetch_by_arxiv, fetch_by_doi
-from app.services.ingestion import IngestionResult, ingest_by_ids, ingest_date_range, ingest_latest_heliophysics
+from app.services.ingestion import (
+    IngestionResult,
+    ingest_by_ids,
+    ingest_date_range,
+    ingest_latest_heliophysics,
+)
+
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 # In-memory cache hit/miss counters
@@ -357,13 +363,16 @@ async def ingest_specific_ids(arxiv_ids: list[str]):
         "arxiv_ids": result.arxiv_ids,
     }
 
+
 @router.post(
     "/ingest/daterange",
     summary="Ingest heliophysics papers from a specific date range",
 )
 async def ingest_date_range_endpoint(
-    start_date: str = Query(..., description="Start date in YYYYMMDD format e.g. 20240101"),
-    end_date: str = Query(..., description="End date in YYYYMMDD format e.g. 20240331"),
+    start_date: str = Query(
+        ..., description="Start date in YYYYMMDD format e.g. 20250101"
+    ),
+    end_date: str = Query(..., description="End date in YYYYMMDD format e.g. 20250131"),
     max_per_category: int = Query(default=100),
 ):
     """Ingest papers from arXiv submitted between two dates.
@@ -395,6 +404,7 @@ async def ingest_date_range_endpoint(
         "failed": result.failed,
         "arxiv_ids": result.arxiv_ids,
     }
+
 
 @router.get(
     "/health",
