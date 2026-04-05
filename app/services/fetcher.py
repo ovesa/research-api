@@ -441,12 +441,6 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
         primary_category not in HELIOPHYSICS_ARXIV_CATEGORIES
         and len(matching_categories) < 2
     ):
-        log.warning(
-            "heliophysics_validation_failed",
-            primary_category=primary_category,
-            categories=categories,
-            duration_ms=duration_ms,
-        )
         return DomainValidationError(
             identifier=arxiv_id,
             reason=(
@@ -457,5 +451,21 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
             title=arxiv_data.get("title"),
         )
 
-    log.info("fetch_complete", duration_ms=duration_ms, source="arxiv")
+    # Second layer: keyword validation even for category matched papers
+    # Catches broad category papers like stellar astrophysics that aren't
+    # specifically about solar/heliospheric physics
+    title = arxiv_data.get("title", "")
+    abstract = arxiv_data.get("abstract")
+    if not _is_heliophysics_by_keywords(title, abstract):
+        return DomainValidationError(
+            identifier=arxiv_id,
+            reason=(
+                "Paper is in a heliophysics category but no heliophysics "
+                "keywords were found in the title or abstract. "
+                "This usually means it is stellar astrophysics rather than "
+                "solar or space physics specifically."
+            ),
+            title=title,
+        )
+
     return _normalize_arxiv(clean_id, arxiv_data, citation_count)
