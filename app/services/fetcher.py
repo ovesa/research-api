@@ -403,14 +403,23 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     categories = arxiv_data.get("categories", [])
     citation_count = semantic_data.get("citation_count")
 
-    matching_categories = [c for c in categories if c in HELIOPHYSICS_ARXIV_CATEGORIES]
+    # Primary category is the first in the list — arXiv authors set this deliberately
+    primary_category = categories[0] if categories else ""
+    matching_categories = [
+        c for c in categories
+        if c in HELIOPHYSICS_ARXIV_CATEGORIES
+    ]
 
-    if not matching_categories:
+    # Require either the primary category to be heliophysics
+    # or at least two heliophysics categories to avoid edge cases
+    # like this paper where astro-ph.SR is a minor secondary tag
+    if primary_category not in HELIOPHYSICS_ARXIV_CATEGORIES and len(matching_categories) < 2:
         return DomainValidationError(
             identifier=arxiv_id,
             reason=(
-                f"Paper categories {categories} do not include any "
-                f"heliophysics categories {list(HELIOPHYSICS_ARXIV_CATEGORIES)}."
+                f"Primary category '{primary_category}' is not a heliophysics category. "
+                f"Paper must have a heliophysics primary category or multiple "
+                f"heliophysics categories. Found: {categories}."
             ),
             title=arxiv_data.get("title"),
         )
