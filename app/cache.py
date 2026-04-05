@@ -22,7 +22,6 @@ async def get_redis():
         )
     return redis
 
-
 async def get_cached_paper(identifier: str) -> str | None:
     """Look up a paper in Redis by its identifier.
 
@@ -34,7 +33,6 @@ async def get_cached_paper(identifier: str) -> str | None:
     """
     client = await get_redis()
     return await client.get(f"paper:{identifier}")
-
 
 async def cache_paper(identifier: str, data: str) -> None:
     """Store a paper's JSON representation in Redis with a TTL.
@@ -56,7 +54,6 @@ async def cache_paper(identifier: str, data: str) -> None:
         settings.cache_ttl_seconds,
         data
     )
-
 
 async def close_redis():
     """Close the Redis connection cleanly on app shutdown.
