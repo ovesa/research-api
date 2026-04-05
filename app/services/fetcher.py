@@ -79,6 +79,7 @@ async def _fetch_crossref(client: httpx.AsyncClient, doi: str) -> dict:
 
 async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
     """Fetch paper metadata from the arXiv API by arXiv ID.
+    see https://info.arxiv.org/help/api/index.html.
 
     arXiv is the primary source for preprint lookups. It returns
     title, authors, abstract, and subject categories. The categories
@@ -94,7 +95,7 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
     """
     try:
         clean_id = arxiv_id.replace("arxiv:", "").strip()
-        url = f"http://export.arxiv.org/api/query?id_list={clean_id}"
+        url = f"https://export.arxiv.org/api/query?id_list={clean_id}"
         response = await client.get(url)
         if response.status_code != 200:
             return {}
