@@ -1,21 +1,21 @@
 import asyncio
 from dataclasses import dataclass
 
+import httpx
 import structlog
 
 from app.models.paper import HELIOPHYSICS_ARXIV_CATEGORIES, DomainValidationError
 from app.services.database import get_paper, save_paper
-from app.services.fetcher import _fetch_arxiv, _make_client
 
 logger = structlog.get_logger(__name__)
 
 
 @dataclass
 class IngestionResult:
-    """Summary of a bulk ingestion paper run from source.
+    """Summary of a bulk ingestion run.
 
     Returned after an ingestion job completes so the caller knows
-    exactly what happened (i.e., how many papers were found, how many
+    exactly what happened (e.g., how many papers were found, how many
     passed validation, how many were already in the database, and
     how many failed).
 
@@ -40,6 +40,24 @@ class IngestionResult:
     arxiv_ids: list[str]
 
 
+def _make_ingestion_client() -> httpx.AsyncClient:
+    """Create an httpx client configured for arXiv ingestion requests.
+
+    Uses a longer timeout than the standard client because arXiv category
+    search queries can be slow, especially when fetching many results.
+    Sequential category searches are safer than concurrent ones to avoid
+    triggering arXiv's rate limiter.
+
+    Returns:
+        httpx.AsyncClient: Configured client ready for use as a context manager.
+    """
+    return httpx.AsyncClient(
+        timeout=30,
+        follow_redirects=True,
+        headers={"User-Agent": "research-api/0.1 (heliophysics paper lookup)"},
+    )
+
+
 async def _search_arxiv_category(
     category: str,
     max_results: int = 25,
@@ -61,7 +79,7 @@ async def _search_arxiv_category(
         list[str]: List of arXiv IDs found in this category.
             e.g. ['2509.19847', '2509.18234', ...]
     """
-    async with _make_client() as client:
+    async with _make_ingestion_client() as client:
         url = (
             f"https://export.arxiv.org/api/query"
             f"?search_query=cat:{category}"
@@ -69,7 +87,15 @@ async def _search_arxiv_category(
             f"&sortOrder=descending"
             f"&max_results={max_results}"
         )
-        response = await client.get(url)
+
+        try:
+            response = await client.get(url)
+        except httpx.ReadTimeout:
+            logger.warning(
+                "arxiv_search_timeout",
+                category=category,
+            )
+            return []
 
         if response.status_code != 200:
             logger.warning(
@@ -109,10 +135,10 @@ async def ingest_latest_heliophysics(
 ) -> IngestionResult:
     """Fetch and store the latest heliophysics papers from arXiv.
 
-    Searches all heliophysics arXiv categories concurrently, deduplicates
-    the results, skips papers already in Postgres, and fetches new ones
-    concurrently. Rate limiting is applied between fetches to respect
-    arXiv's guidelines of no more than 4 requests per second.
+    Searches all heliophysics arXiv categories sequentially with a
+    1 second pause between each to respect arXiv rate limits. Deduplicates
+    results across categories, skips papers already in Postgres, and
+    fetches new ones with rate limiting between each fetch.
 
     Args:
         max_per_category (int): Maximum papers to fetch per arXiv
@@ -127,13 +153,12 @@ async def ingest_latest_heliophysics(
     log = logger.bind(max_per_category=max_per_category)
     log.info("ingestion_started", categories=list(HELIOPHYSICS_ARXIV_CATEGORIES))
 
-    # Search all heliophysics categories concurrently
-    category_results = await asyncio.gather(
-        *[
-            _search_arxiv_category(category, max_per_category)
-            for category in HELIOPHYSICS_ARXIV_CATEGORIES
-        ]
-    )
+    # Search categories sequentially to avoid triggering rate limits
+    category_results = []
+    for category in HELIOPHYSICS_ARXIV_CATEGORIES:
+        results = await _search_arxiv_category(category, max_per_category)
+        category_results.append(results)
+        await asyncio.sleep(1)  # pause between category searches
 
     # Flatten and deduplicate as same paper can appear in multiple categories
     all_ids = list(
