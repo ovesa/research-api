@@ -130,6 +130,174 @@ async def _search_arxiv_category(
         return ids
 
 
+async def _search_arxiv_date_range(
+    category: str,
+    start_date: str,
+    end_date: str,
+    max_results: int = 100,
+) -> list[str]:
+    """Search arXiv for papers in a category within a date range.
+
+    Uses the arXiv API submittedDate filter to find papers submitted
+    between two dates. Useful for backfilling data.
+
+    Args:
+        category (str): The arXiv category to search.
+        start_date (str): Start date in YYYYMMDD format. e.g. '20240101'
+        end_date (str): End date in YYYYMMDD format. e.g. '20240331'
+        max_results (int): Maximum results to return. Defaults to 100.
+
+    Returns:
+        list[str]: List of arXiv IDs found in this category and date range.
+    """
+    async with _make_ingestion_client() as client:
+        url = (
+            f"https://export.arxiv.org/api/query"
+            f"?search_query=cat:{category}"
+            f"+AND+submittedDate:[{start_date}0000+TO+{end_date}2359]"
+            f"&sortBy=submittedDate"
+            f"&sortOrder=descending"
+            f"&max_results={max_results}"
+        )
+
+        try:
+            response = await client.get(url)
+        except httpx.ReadTimeout:
+            logger.warning(
+                "arxiv_date_search_timeout",
+                category=category,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            return []
+
+        if response.status_code != 200:
+            logger.warning(
+                "arxiv_date_search_failed",
+                category=category,
+                status_code=response.status_code,
+            )
+            return []
+
+        text = response.text
+        ids = []
+
+        remaining = text
+        while "<id>http://arxiv.org/abs/" in remaining:
+            start = remaining.find("<id>http://arxiv.org/abs/") + 25
+            end = remaining.find("</id>", start)
+            if end == -1:
+                break
+            raw_id = remaining[start:end].strip()
+            clean_id = raw_id.split("v")[0]
+            ids.append(clean_id)
+            remaining = remaining[end + 5 :]
+
+        logger.info(
+            "arxiv_date_search_complete",
+            category=category,
+            start_date=start_date,
+            end_date=end_date,
+            papers_found=len(ids),
+        )
+        return ids
+
+
+async def ingest_date_range(
+    start_date: str,
+    end_date: str,
+    max_per_category: int = 100,
+) -> IngestionResult:
+    """Ingest heliophysics papers from arXiv within a date range.
+
+    Searches all heliophysics categories for papers submitted between
+    the given dates. Useful for backfilling data. Run once
+    per month to build up a collection going back as far as needed.
+
+    Args:
+        start_date (str): Start date in YYYYMMDD format. e.g. '20240101'
+        end_date (str): End date in YYYYMMDD format. e.g. '20240331'
+        max_per_category (int): Maximum papers per category. Defaults
+            to 100. Increase for busy months.
+
+    Returns:
+        IngestionResult: Summary of what was ingested, skipped,
+            rejected, and failed.
+    """
+    log = logger.bind(start_date=start_date, end_date=end_date)
+    log.info(
+        "date_range_ingestion_started", categories=list(HELIOPHYSICS_ARXIV_CATEGORIES)
+    )
+
+    # Search categories sequentially to avoid rate limiting
+    category_results = []
+    for category in HELIOPHYSICS_ARXIV_CATEGORIES:
+        results = await _search_arxiv_date_range(
+            category, start_date, end_date, max_per_category
+        )
+        category_results.append(results)
+        await asyncio.sleep(1)
+
+    # Flatten and deduplicate
+    all_ids = list(
+        dict.fromkeys(
+            arxiv_id for category_ids in category_results for arxiv_id in category_ids
+        )
+    )
+
+    log.info("date_range_ids_collected", total_unique=len(all_ids))
+
+    result = IngestionResult(
+        total_found=len(all_ids),
+        already_stored=0,
+        newly_ingested=0,
+        rejected=0,
+        failed=0,
+        arxiv_ids=[],
+    )
+
+    for arxiv_id in all_ids:
+        try:
+            existing = await get_paper(arxiv_id)
+            if existing:
+                result.already_stored += 1
+                continue
+
+            from app.services.fetcher import fetch_by_arxiv
+
+            paper = await fetch_by_arxiv(arxiv_id)
+
+            if isinstance(paper, DomainValidationError):
+                result.rejected += 1
+                log.info(
+                    "date_range_rejected",
+                    arxiv_id=arxiv_id,
+                    reason=paper.reason,
+                )
+                continue
+
+            await save_paper(paper)
+            result.newly_ingested += 1
+            result.arxiv_ids.append(arxiv_id)
+            log.info("date_range_saved", arxiv_id=arxiv_id, title=paper.title)
+
+            await asyncio.sleep(0.25)
+
+        except Exception as e:
+            result.failed += 1
+            log.error("date_range_error", arxiv_id=arxiv_id, error=str(e))
+
+    log.info(
+        "date_range_ingestion_complete",
+        total_found=result.total_found,
+        newly_ingested=result.newly_ingested,
+        rejected=result.rejected,
+        failed=result.failed,
+    )
+
+    return result
+
+
 async def ingest_latest_heliophysics(
     max_per_category: int = 25,
 ) -> IngestionResult:

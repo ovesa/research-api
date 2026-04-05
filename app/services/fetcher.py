@@ -116,6 +116,13 @@ def _is_stellar_astrophysics(title: str, abstract: Optional[str]) -> bool:
         "exoatmosphere",
         "secondary eclipse",
         "transit photometry",
+        "astrosphere",
+        "astrospheres",
+        "plasma sheet",
+        "interstellar medium",
+        "ism hydrogen",
+        "lyman-alpha",
+        "bow shock",
     }
 
     title_lower = title.lower()

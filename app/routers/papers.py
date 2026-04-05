@@ -21,12 +21,7 @@ from app.services.database import (
     search_papers,
 )
 from app.services.fetcher import fetch_by_arxiv, fetch_by_doi
-from app.services.ingestion import (
-    IngestionResult,
-    ingest_by_ids,
-    ingest_latest_heliophysics,
-)
-
+from app.services.ingestion import IngestionResult, ingest_by_ids, ingest_date_range, ingest_latest_heliophysics
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 # In-memory cache hit/miss counters
@@ -362,6 +357,44 @@ async def ingest_specific_ids(arxiv_ids: list[str]):
         "arxiv_ids": result.arxiv_ids,
     }
 
+@router.post(
+    "/ingest/daterange",
+    summary="Ingest heliophysics papers from a specific date range",
+)
+async def ingest_date_range_endpoint(
+    start_date: str = Query(..., description="Start date in YYYYMMDD format e.g. 20240101"),
+    end_date: str = Query(..., description="End date in YYYYMMDD format e.g. 20240331"),
+    max_per_category: int = Query(default=100),
+):
+    """Ingest papers from arXiv submitted between two dates.
+
+    Useful for backfilling data. Run once per month to
+    build up a collection. Each run checks Postgres first so it is
+    safe to re-run; already stored papers are skipped.
+
+    Args:
+        start_date (str): Start date in YYYYMMDD format.
+        end_date (str): End date in YYYYMMDD format.
+        max_per_category (int): Maximum papers per category. Defaults to 100.
+
+    Returns:
+        dict: Ingestion summary with counts and newly ingested IDs.
+    """
+    result = await ingest_date_range(
+        start_date=start_date,
+        end_date=end_date,
+        max_per_category=max_per_category,
+    )
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_found": result.total_found,
+        "newly_ingested": result.newly_ingested,
+        "already_stored": result.already_stored,
+        "rejected": result.rejected,
+        "failed": result.failed,
+        "arxiv_ids": result.arxiv_ids,
+    }
 
 @router.get(
     "/health",
