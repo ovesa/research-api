@@ -27,9 +27,13 @@ HELIOPHYSICS_JOURNALS = {
 # keywords I am particularly interested in
 HELIOPHYSICS_KEYWORDS = {
     "solar wind",
+    "solar flare",
+    "coronal mass ejection",
+    "cme",
     "photosphere",
     "chromosphere",
     "corona",
+    "coronal",
     "space weather",
     "sunspot",
     "magnetohydrodynamics",
@@ -49,8 +53,27 @@ HELIOPHYSICS_KEYWORDS = {
     "DKIST",
     "solar dynamo",
     "inertial modes",
+    "solar corona",
+    "solar atmosphere",
+    "solar magnetic",
+    "solar cycle",
+    "solar energetic",
+    "solar eruption",
+    "solar oscillation",
+    "alfven",
+    "magnetohydrodynamic",
+    "mhd",
+    "plasma",
+    "magnetic reconnection",
+    "magnetic field",
+    "flux tube",
+    "parker solar probe",
+    "solar orbiter",
+    "soho",
+    "stereo",
+    "hinode",
+    "iris",
 }
-
 
 class IdentifierType(str, Enum):
     """The two supported paper identifier formats.

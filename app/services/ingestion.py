@@ -82,7 +82,7 @@ async def _search_arxiv_category(
     async with _make_ingestion_client() as client:
         url = (
             f"https://export.arxiv.org/api/query"
-            f"?search_query=cat:{category}"
+            f"?search_query=cat:{category}+AND+(solar+OR+heliosphere+OR+corona+OR+magnetosphere+OR+space+weather)"
             f"&sortBy=submittedDate"
             f"&sortOrder=descending"
             f"&max_results={max_results}"
