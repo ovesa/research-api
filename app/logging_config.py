@@ -30,6 +30,10 @@ def setup_logging(debug: bool = False) -> None:
         # Readable JSON for production
         renderer = structlog.processors.JSONRenderer()
 
+    # Silence noisy httpx and httpcore debug logs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     structlog.configure(
         processors=shared_processors + [renderer],
         wrapper_class=structlog.stdlib.BoundLogger,
