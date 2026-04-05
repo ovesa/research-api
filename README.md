@@ -164,7 +164,7 @@ A few things I made deliberate choices about:
 
 **Caching rejections in Redis but not Postgres**: if someone submits an invalid identifier repeatedly, I don't want to call CrossRef every time. Caching the rejection prevents that. But I don't store rejections in Postgres because that's meant to be a clean, curated collection.
 
---
+---
 
 ## **Acknowledgements**
 
