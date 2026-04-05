@@ -7,7 +7,6 @@ from enum import Enum
 HELIOPHYSICS_ARXIV_CATEGORIES = {
     "astro-ph.SR",  # Solar and Stellar Astrophysics
     "physics.space-ph",  # Space Physics
-    "astro-ph.EP",  # Earth and Planetary Astrophysics (solar wind effects)
 }
 
 # Journals that publish heliophysics research
