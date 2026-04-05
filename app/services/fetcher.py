@@ -126,6 +126,11 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
         if "<entry>" not in text:
             return {}
 
+        # Isolate just the entry block so we don't grab feed-level tags
+        entry_start = text.find("<entry>")
+        entry_end = text.find("</entry>")
+        entry_text = text[entry_start:entry_end]
+
         def extract(tag: str) -> str:
             """Extract text content between an XML tag pair.
 
@@ -136,11 +141,11 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
                 str: The text content between the tags, or empty string
                     if the tag is not found.
             """
-            start = text.find(f"<{tag}>")
-            end = text.find(f"</{tag}>")
+            start = entry_text.find(f"<{tag}>")
+            end = entry_text.find(f"</{tag}>")
             if start == -1 or end == -1:
                 return ""
-            return text[start + len(tag) + 2 : end].strip()
+            return entry_text[start + len(tag) + 2 : end].strip()
 
         # Extract all author names
         authors = []
