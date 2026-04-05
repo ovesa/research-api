@@ -54,6 +54,74 @@ def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
     return journal.lower().strip() in HELIOPHYSICS_JOURNALS
 
 
+def _is_stellar_astrophysics(title: str, abstract: Optional[str]) -> bool:
+    """Check if a paper is stellar astrophysics rather than heliophysics.
+
+    Used as a rejection filter after category and keyword validation.
+    Some papers pass heliophysics keyword checks because they mention
+    'plasma' or 'magnetic field' but are fundamentally about stellar
+    evolution, stellar populations, or other non-solar topics.
+
+    Args:
+        title (str): The paper title.
+        abstract (str | None): The paper abstract.
+
+    Returns:
+        bool: True if the paper appears to be stellar astrophysics
+            rather than heliophysics, False otherwise.
+    """
+    # These terms in the title strongly indicate stellar astrophysics
+    # rather than solar/heliospheric physics
+    stellar_title_keywords = {
+        "red giant",
+        "red giants",
+        "white dwarf",
+        "white dwarfs",
+        "neutron star",
+        "neutron stars",
+        "black hole",
+        "black holes",
+        "exoplanet",
+        "exoplanets",
+        "galaxy",
+        "galaxies",
+        "globular cluster",
+        "open cluster",
+        "stellar atmosphere",
+        "stellar population",
+        "stellar evolution",
+        "stellar mass",
+        "star formation",
+        "protostar",
+        "supernova",
+        "supernovae",
+        "pulsar",
+        "cepheid",
+        "binary star",
+        "binary stars",
+        "massive star",
+        "massive stars",
+        "multiplicity",
+        "asteroseismic",
+        "asteroseismology",
+        "kepler red",
+        "milky way",
+        "spectroscopic binary",
+        "eclipsing binary",
+        "variable star",
+        "variable stars",
+        "dwarf galaxy",
+        "hot jupiter",
+        "transiting",
+        "exoatmosphere",
+        "secondary eclipse",
+        "transit photometry",
+    }
+
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in stellar_title_keywords)
+
+
 def _make_client() -> httpx.AsyncClient:
     """Create a configured httpx async client for external API calls.
 
@@ -468,6 +536,24 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
                 "keywords were found in the title or abstract. "
                 "This usually means it is stellar astrophysics rather than "
                 "solar or space physics specifically."
+            ),
+            title=title,
+        )
+
+    # Final rejection: catch stellar astrophysics papers that slipped
+    # through keyword validation because they mention plasma or magnetic fields
+    if _is_stellar_astrophysics(title, abstract):
+        log.warning(
+            "stellar_astrophysics_rejected",
+            identifier=clean_id,
+            title=title,
+            duration_ms=duration_ms,
+        )
+        return DomainValidationError(
+            identifier=arxiv_id,
+            reason=(
+                "Paper appears to be stellar astrophysics rather than "
+                "heliophysics based on title keywords."
             ),
             title=title,
         )
