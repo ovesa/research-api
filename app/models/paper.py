@@ -76,15 +76,17 @@ HELIOPHYSICS_KEYWORDS = {
 }
 
 class IdentifierType(str, Enum):
-    """The two supported paper identifier formats.
+    """The supported paper identifier formats.
 
     Attributes:
         doi: Digital Object Identifier. e.g. 10.1038/nature12373
-        arxiv: arXiv preprint ID. e.g. 2103.08049 or arxiv:2103.08049
+        arxiv: arXiv preprint ID. e.g. 2103.08049
+        ads: NASA ADS bibcode. e.g. 2021SoPh..296...84R
     """
 
     doi = "doi"
     arxiv = "arxiv"
+    ads = "ads"
 
 
 class Author(BaseModel):
