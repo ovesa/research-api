@@ -47,6 +47,9 @@ class Settings(BaseSettings):
 
     # External API timeout in seconds
     external_api_timeout: int = 10
+    
+    # NASA ADS
+    ads_api_token: str = ""
 
     class Config:
         env_file = ".env"

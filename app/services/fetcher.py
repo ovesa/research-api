@@ -54,6 +54,76 @@ def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
     return journal.lower().strip() in HELIOPHYSICS_JOURNALS
 
 
+def _is_stellar_astrophysics(title: str, abstract: Optional[str]) -> bool:
+    """Check if a paper is stellar astrophysics rather than heliophysics.
+
+    Used as a rejection filter after category and keyword validation.
+    Some papers pass heliophysics keyword checks because they mention
+    'plasma' or 'magnetic field' but are fundamentally about stellar
+    evolution, stellar populations, or other non-solar topics.
+
+    Args:
+        title (str): The paper title.
+        abstract (str | None): The paper abstract.
+
+    Returns:
+        bool: True if the paper appears to be stellar astrophysics
+            rather than heliophysics, False otherwise.
+    """
+    stellar_title_keywords = {
+        "red giant",
+        "red giants",
+        "white dwarf",
+        "white dwarfs",
+        "neutron star",
+        "neutron stars",
+        "black hole",
+        "black holes",
+        "exoplanet",
+        "exoplanets",
+        "galaxy",
+        "galaxies",
+        "globular cluster",
+        "open cluster",
+        "stellar population",
+        "stellar evolution",
+        "stellar mass",
+        "star formation",
+        "protostar",
+        "supernova",
+        "supernovae",
+        "pulsar",
+        "cepheid",
+        "binary star",
+        "binary stars",
+        "massive star",
+        "massive stars",
+        "multiplicity",
+        "asteroseismic",
+        "asteroseismology",
+        "kepler red",
+        "milky way",
+        "spectroscopic binary",
+        "eclipsing binary",
+        "variable star",
+        "variable stars",
+        "dwarf galaxy",
+        "hot jupiter",
+        "transiting",
+        "secondary eclipse",
+        "transit photometry",
+        "astrosphere",
+        "astrospheres",
+        "plasma sheet",
+        "interstellar medium",
+        "lyman-alpha",
+        "bow shock",
+    }
+
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in stellar_title_keywords)
+
+
 def _make_client() -> httpx.AsyncClient:
     """Create a configured httpx async client for external API calls.
 
@@ -229,6 +299,60 @@ async def _fetch_semantic_scholar(
         return {}
 
 
+async def _fetch_ads(
+    client: httpx.AsyncClient,
+    bibcode: str,
+) -> dict:
+    """Fetch paper metadata from the NASA ADS API by bibcode.
+
+    ADS is the primary database for astronomy and astrophysics literature.
+    It indexes papers from arXiv, all major journals, conference proceedings,
+    and technical reports.
+
+    Args:
+        client (httpx.AsyncClient): The shared HTTP client for this request.
+        bibcode (str): The ADS bibcode to look up.
+            e.g. '2025ApJ...123..456V'
+
+    Returns:
+        dict: Parsed ADS paper metadata, or empty dict if not found.
+    """
+    try:
+        from app.config import settings
+
+        # URL encode the bibcode (it contains special characters)
+        import urllib.parse
+
+        encoded = urllib.parse.quote(bibcode, safe="")
+
+        url = (
+            f"https://api.adsabs.harvard.edu/v1/search/query"
+            f"?q=bibcode:{encoded}"
+            f"&fl=bibcode,title,author,abstract,pubdate,pub,doi,identifier,keyword,citation_count"
+        )
+
+        response = await client.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {settings.ads_api_token}",
+                "User-Agent": "research-api/0.1 (heliophysics paper lookup)",
+            },
+        )
+
+        if response.status_code != 200:
+            return {}
+
+        data = response.json()
+        docs = data.get("response", {}).get("docs", [])
+        if not docs:
+            return {}
+
+        return docs[0]
+
+    except Exception:
+        return {}
+
+
 def _normalize_crossref(
     doi: str, data: dict, citation_count: Optional[int]
 ) -> PaperMetadata:
@@ -324,6 +448,76 @@ def _normalize_arxiv(
         citation_count=citation_count,
         source="arxiv",
         fetched_at=datetime.now(timezone.utc),
+    )
+
+
+def _normalize_ads(
+    bibcode: str,
+    data: dict,
+) -> PaperMetadata:
+    """Normalize a raw ADS response into a PaperMetadata object.
+
+    ADS returns cleaner, more complete metadata than CrossRef for
+    astronomy papers. Abstracts are almost always present. Author
+    lists are complete. Keywords are included when available.
+
+    Args:
+        bibcode (str): The ADS bibcode that was looked up.
+        data (dict): The raw ADS document from the search response.
+
+    Returns:
+        PaperMetadata: Normalized paper metadata.
+    """
+    # Extract authors
+    raw_authors = data.get("author", [])
+    authors = [Author(name=name) for name in raw_authors]
+
+    # Extract title — ADS returns a list
+    titles = data.get("title", [])
+    title = titles[0] if titles else "Unknown Title"
+
+    # Extract DOI if available
+    doi = None
+    identifiers = data.get("identifier", [])
+    for ident in identifiers:
+        if ident.startswith("10."):
+            doi = ident
+            break
+
+    # Also check the doi field directly
+    if not doi:
+        doi_list = data.get("doi", [])
+        doi = doi_list[0] if doi_list else None
+
+    # Extract arXiv ID if available
+    arxiv_id = None
+    for ident in identifiers:
+        if ident.startswith("arXiv:"):
+            arxiv_id = ident.replace("arXiv:", "").strip()
+            break
+
+    # Extract publication date
+    pubdate = data.get("pubdate", "")
+    published_date = pubdate[:7] if pubdate else None  # YYYY-MM
+
+    # Construct URL
+    ads_url = f"https://ui.adsabs.harvard.edu/abs/{bibcode}"
+
+    return PaperMetadata(
+        identifier=bibcode,
+        identifier_type=IdentifierType.ads,
+        title=title,
+        authors=authors,
+        abstract=data.get("abstract"),
+        published_date=published_date,
+        journal=data.get("pub"),
+        doi=doi,
+        arxiv_id=arxiv_id,
+        arxiv_categories=[],
+        citation_count=data.get("citation_count"),
+        source="ads",
+        fetched_at=datetime.now(timezone.utc),
+        url=ads_url,
     )
 
 
@@ -459,3 +653,78 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
 
     log.info("fetch_complete", duration_ms=duration_ms, source="arxiv")
     return _normalize_arxiv(clean_id, arxiv_data, citation_count)
+
+
+async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
+    """Fetch and validate a heliophysics paper by ADS bibcode.
+
+    Hits the NASA ADS API and validates the result against heliophysics
+    journal and keyword lists. ADS is the authoritative database for
+    astronomy literature and returns richer metadata than CrossRef.
+
+    Args:
+        bibcode (str): The ADS bibcode to look up.
+            e.g. '2025ApJ...123..456V'
+
+    Returns:
+        PaperMetadata: Normalized metadata if paper is heliophysics-related.
+        DomainValidationError: Rejection details if paper does not match.
+    """
+    import time
+
+    log = logger.bind(identifier=bibcode, identifier_type="ads")
+    log.info("fetch_started")
+    start = time.perf_counter()
+
+    async with _make_client() as client:
+        ads_data = await _fetch_ads(client, bibcode)
+
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
+    if not ads_data:
+        log.warning(
+            "fetch_failed", reason="bibcode not found in ADS", duration_ms=duration_ms
+        )
+        return DomainValidationError(
+            identifier=bibcode,
+            reason="Bibcode not found in NASA ADS.",
+        )
+
+    titles = ads_data.get("title", [])
+    title = titles[0] if titles else ""
+    abstract = ads_data.get("abstract")
+    journal = ads_data.get("pub")
+
+    # Validate heliophysics relevance
+    if not _is_heliophysics_by_journal(journal):
+        if not _is_heliophysics_by_keywords(title, abstract):
+            log.warning(
+                "heliophysics_validation_failed",
+                journal=journal,
+                duration_ms=duration_ms,
+            )
+            return DomainValidationError(
+                identifier=bibcode,
+                reason=(
+                    f"Paper does not appear to be heliophysics-related. "
+                    f"Journal '{journal}' is not on the heliophysics whitelist "
+                    f"and no heliophysics keywords were found in the title or abstract."
+                ),
+                title=title,
+            )
+
+    if _is_stellar_astrophysics(title, abstract):
+        log.warning(
+            "stellar_astrophysics_rejected",
+            identifier=bibcode,
+            title=title,
+            duration_ms=duration_ms,
+        )
+        return DomainValidationError(
+            identifier=bibcode,
+            reason="Paper appears to be stellar astrophysics rather than heliophysics.",
+            title=title,
+        )
+
+    log.info("fetch_complete", duration_ms=duration_ms, source="ads")
+    return _normalize_ads(bibcode, ads_data)
