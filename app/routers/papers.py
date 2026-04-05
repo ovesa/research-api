@@ -20,7 +20,7 @@ from app.services.database import (
     save_paper,
     search_papers,
 )
-from app.services.fetcher import fetch_by_arxiv, fetch_by_doi
+from app.services.fetcher import fetch_by_ads, fetch_by_arxiv, fetch_by_doi
 from app.services.ingestion import (
     IngestionResult,
     ingest_by_ids,
@@ -87,9 +87,10 @@ async def lookup_paper(request: PaperLookupRequest):
     # (3) External APIs
     if request.identifier_type == IdentifierType.doi:
         result = await fetch_by_doi(request.identifier)
-    else:
+    elif request.identifier_type == IdentifierType.arxiv:
         result = await fetch_by_arxiv(request.identifier)
-
+    else:
+        result = await fetch_by_ads(request.identifier)
     # Cache the result regardless of validation outcome
     # This prevents hammering external APIs with repeated invalid lookups
     await cache_paper(request.identifier, json.dumps(result.model_dump(), default=str))
