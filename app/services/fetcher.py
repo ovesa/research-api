@@ -180,7 +180,9 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
             "title": extract("title"),
             "abstract": extract("summary"),
             "authors": authors,
-            "categories": categories,
+            "categories": list(
+                dict.fromkeys(categories)
+            ),  # deduplicate preserving order
             "published": extract("published"),
         }
 
@@ -405,15 +407,15 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
 
     # Primary category is the first in the list — arXiv authors set this deliberately
     primary_category = categories[0] if categories else ""
-    matching_categories = [
-        c for c in categories
-        if c in HELIOPHYSICS_ARXIV_CATEGORIES
-    ]
+    matching_categories = [c for c in categories if c in HELIOPHYSICS_ARXIV_CATEGORIES]
 
     # Require either the primary category to be heliophysics
     # or at least two heliophysics categories to avoid edge cases
     # like this paper where astro-ph.SR is a minor secondary tag
-    if primary_category not in HELIOPHYSICS_ARXIV_CATEGORIES and len(matching_categories) < 2:
+    if (
+        primary_category not in HELIOPHYSICS_ARXIV_CATEGORIES
+        and len(matching_categories) < 2
+    ):
         return DomainValidationError(
             identifier=arxiv_id,
             reason=(
