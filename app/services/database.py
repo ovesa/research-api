@@ -1,0 +1,205 @@
+import json
+from typing import Optional
+
+from app.database import get_pool
+from app.models.paper import Author, IdentifierType, PaperMetadata
+
+
+async def save_paper(paper: PaperMetadata) -> None:
+    """Save a validated heliophysics paper to Postgres.
+
+    Called after every successful fetch and heliophysics validation.
+    Uses INSERT ... ON CONFLICT DO NOTHING so re-fetching an already
+    stored paper is safe and does not overwrite existing data.
+
+    Args:
+        paper (PaperMetadata): The normalized paper metadata to store.
+
+    Returns:
+        None
+    """
+    pool = await get_pool()
+
+    authors_json = json.dumps([a.model_dump() for a in paper.authors])
+    categories_json = json.dumps(paper.arxiv_categories)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO papers (
+                identifier, identifier_type, title, authors, abstract,
+                published_date, journal, doi, arxiv_id, arxiv_categories,
+                citation_count, source, fetched_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ON CONFLICT (identifier) DO NOTHING
+            """,
+            paper.identifier,
+            paper.identifier_type.value,
+            paper.title,
+            authors_json,
+            paper.abstract,
+            paper.published_date,
+            paper.journal,
+            paper.doi,
+            paper.arxiv_id,
+            categories_json,
+            paper.citation_count,
+            paper.source,
+            paper.fetched_at,
+        )
+
+
+async def get_paper(identifier: str) -> Optional[PaperMetadata]:
+    """Retrieve a single paper from Postgres by identifier.
+
+    Used as a fallback when Redis cache has expired but the paper
+    is still in the database. Avoids hitting external APIs again
+    for data we already have.
+
+    Args:
+        identifier (str): The DOI or arXiv ID to look up.
+
+    Returns:
+        PaperMetadata: The stored paper if found, None otherwise.
+    """
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM papers WHERE identifier = $1", identifier
+        )
+
+    if not row:
+        return None
+
+    return _row_to_paper(row)
+
+
+async def list_papers(
+    limit: int = 20,
+    offset: int = 0,
+    identifier_type: Optional[str] = None,
+    source: Optional[str] = None,
+) -> tuple[list[PaperMetadata], int]:
+    """List stored papers with optional filtering and pagination.
+
+    Args:
+        limit (int): Maximum number of papers to return. Defaults to 20.
+        offset (int): Number of papers to skip for pagination.
+        identifier_type (str | None): Filter by 'doi' or 'arxiv'.
+        source (str | None): Filter by source API, e.g. 'crossref'.
+
+    Returns:
+        tuple[list[PaperMetadata], int]: A list of papers and the total
+            count matching the filters, for pagination metadata.
+    """
+    pool = await get_pool()
+
+    # Build query dynamically based on which filters are provided
+    conditions = []
+    params = []
+    param_index = 1
+
+    if identifier_type:
+        conditions.append(f"identifier_type = ${param_index}")
+        params.append(identifier_type)
+        param_index += 1
+
+    if source:
+        conditions.append(f"source = ${param_index}")
+        params.append(source)
+        param_index += 1
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT * FROM papers
+            {where_clause}
+            ORDER BY fetched_at DESC
+            LIMIT ${param_index} OFFSET ${param_index + 1}
+            """,
+            *params,
+            limit,
+            offset,
+        )
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM papers {where_clause}", *params
+        )
+
+    return [_row_to_paper(row) for row in rows], total
+
+
+async def get_stats() -> dict:
+    """Return aggregate statistics about the stored paper collection.
+
+    Queries Postgres for counts grouped by category, source, and
+    identifier type. Exposed via the /papers/stats endpoint.
+
+    Returns:
+        dict: Contains total count, breakdown by source, breakdown by
+            identifier type, and the most recently fetched paper date.
+    """
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM papers")
+        by_source = await conn.fetch(
+            "SELECT source, COUNT(*) as count FROM papers GROUP BY source"
+        )
+        by_type = await conn.fetch(
+            "SELECT identifier_type, COUNT(*) as count FROM papers GROUP BY identifier_type"
+        )
+        latest = await conn.fetchval("SELECT MAX(fetched_at) FROM papers")
+
+    return {
+        "total_papers": total,
+        "by_source": {row["source"]: row["count"] for row in by_source},
+        "by_identifier_type": {row["identifier_type"]: row["count"] for row in by_type},
+        "latest_fetched_at": latest.isoformat() if latest else None,
+    }
+
+
+def _row_to_paper(row) -> PaperMetadata:
+    """Convert a raw asyncpg database row into a PaperMetadata object.
+
+    asyncpg returns rows as Record objects. This function normalizes
+    the raw types, parsing JSON strings back into Python objects and
+    reconstructing nested Pydantic models.
+
+    Args:
+        row: An asyncpg Record object from a papers table query.
+
+    Returns:
+        PaperMetadata: Fully reconstructed paper metadata object.
+    """
+    authors_raw = (
+        json.loads(row["authors"])
+        if isinstance(row["authors"], str)
+        else row["authors"]
+    )
+    categories_raw = (
+        json.loads(row["arxiv_categories"])
+        if isinstance(row["arxiv_categories"], str)
+        else row["arxiv_categories"]
+    )
+
+    authors = [Author(**a) for a in authors_raw]
+
+    return PaperMetadata(
+        identifier=row["identifier"],
+        identifier_type=IdentifierType(row["identifier_type"]),
+        title=row["title"],
+        authors=authors,
+        abstract=row["abstract"],
+        published_date=row["published_date"],
+        journal=row["journal"],
+        doi=row["doi"],
+        arxiv_id=row["arxiv_id"],
+        arxiv_categories=categories_raw,
+        citation_count=row["citation_count"],
+        source=row["source"],
+        fetched_at=row["fetched_at"],
+    )
