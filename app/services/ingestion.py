@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-
+from app.config import settings
 import httpx
 import structlog
 
@@ -222,6 +222,175 @@ async def _search_arxiv_date_range(
             papers_found=len(ids),
         )
         return ids
+
+
+async def _search_ads(
+    query: str,
+    start_date: str,
+    end_date: str,
+    max_results: int = 100,
+) -> list[str]:
+    """Search NASA ADS for heliophysics papers within a date range.
+
+    Uses the ADS search API to find papers published in heliophysics
+    journals between two dates. ADS is better than arXiv for finding
+    published papers because it indexes all major journals directly.
+
+    Args:
+        query (str): ADS search query string containing keywords.
+        start_date (str): Start date in YYYY-MM format. e.g. '2025-01'
+        end_date (str): End date in YYYY-MM format. e.g. '2025-03'
+        max_results (int): Maximum results to return. Defaults to 100.
+
+    Returns:
+        list[str]: List of ADS bibcodes found matching the query.
+            Returns empty list on error or rate limit.
+    """
+    if not settings.ads_api_token:
+        logger.warning("ads_token_missing")
+        return []
+
+    async with _make_ingestion_client() as client:
+        full_query = (
+            f"({query}) AND "
+            f'pub:("Solar Physics" OR "Journal of Geophysical Research" OR '
+            f'"Geophysical Research Letters" OR "The Astrophysical Journal" OR '
+            f'"The Astrophysical Journal Letters" OR "Astronomy and Astrophysics" OR '
+            f'"Space Weather" OR "Annales Geophysicae") AND '
+            f"pubdate:[{start_date} TO {end_date}]"
+        )
+
+        try:
+            response = await client.get(
+                "https://api.adsabs.harvard.edu/v1/search/query",
+                params={
+                    "q": full_query,
+                    "fl": "bibcode",
+                    "rows": max_results,
+                    "sort": "pubdate desc",
+                },
+                headers={
+                    "Authorization": f"Bearer {settings.ads_api_token}",
+                    "User-Agent": "research-api/0.1 (heliophysics paper lookup)",
+                },
+            )
+        except httpx.ReadTimeout:
+            logger.warning("ads_search_timeout", query=query)
+            return []
+
+        if response.status_code == 429:
+            logger.warning(
+                "ads_rate_limited",
+                retry_after=response.headers.get("Retry-After", "unknown"),
+            )
+            return []
+
+        if response.status_code != 200:
+            logger.warning(
+                "ads_search_failed",
+                status_code=response.status_code,
+                query=query,
+            )
+            return []
+
+        data = response.json()
+        docs = data.get("response", {}).get("docs", [])
+        bibcodes = [doc["bibcode"] for doc in docs if "bibcode" in doc]
+
+        logger.info(
+            "ads_search_complete",
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            papers_found=len(bibcodes),
+        )
+        return bibcodes
+
+
+async def ingest_from_ads(
+    start_date: str,
+    end_date: str,
+    keywords: str = (
+        "inertial modes OR rossby waves OR helioseismology"
+    ),
+    max_results: int = 100,
+) -> IngestionResult:
+    """Ingest heliophysics papers from NASA ADS within a date range.
+
+    Searches ADS for papers published in core heliophysics journals
+    between the given dates. ADS is preferred over arXiv for finding
+    published papers because it has explicit journal coverage and
+    richer metadata including abstracts and citation counts.
+
+    Args:
+        start_date (str): Start date in YYYY-MM format. e.g. '2025-01'
+        end_date (str): End date in YYYY-MM format. e.g. '2025-03'
+        keywords (str): Search keywords to narrow results. Defaults
+            to core heliophysics terms.
+        max_results (int): Maximum papers to retrieve. Defaults to 100.
+
+    Returns:
+        IngestionResult: Summary of what was ingested, skipped,
+            rejected, and failed.
+    """
+    log = logger.bind(start_date=start_date, end_date=end_date)
+    log.info("ads_ingestion_started", keywords=keywords)
+
+    bibcodes = await _search_ads(keywords, start_date, end_date, max_results)
+    log.info("ads_ids_collected", total_unique=len(bibcodes))
+
+    result = IngestionResult(
+        total_found=len(bibcodes),
+        already_stored=0,
+        newly_ingested=0,
+        rejected=0,
+        failed=0,
+        arxiv_ids=[],
+    )
+
+    for bibcode in bibcodes:
+        try:
+            existing = await get_paper(bibcode)
+            if existing:
+                result.already_stored += 1
+                log.info(
+                    "ads_ingestion_skipped", bibcode=bibcode, reason="already_stored"
+                )
+                continue
+
+            from app.services.fetcher import fetch_by_ads
+
+            paper = await fetch_by_ads(bibcode)
+
+            if isinstance(paper, DomainValidationError):
+                result.rejected += 1
+                log.info(
+                    "ads_ingestion_rejected",
+                    bibcode=bibcode,
+                    reason=paper.reason,
+                )
+                continue
+
+            await save_paper(paper)
+            result.newly_ingested += 1
+            result.arxiv_ids.append(bibcode)
+            log.info("ads_ingestion_saved", bibcode=bibcode, title=paper.title)
+
+            # ADS rate limit
+            await asyncio.sleep(0.25)
+
+        except Exception as e:
+            result.failed += 1
+            log.error("ads_ingestion_error", bibcode=bibcode, error=str(e))
+
+    log.info(
+        "ads_ingestion_complete",
+        total_found=result.total_found,
+        newly_ingested=result.newly_ingested,
+        rejected=result.rejected,
+        failed=result.failed,
+    )
+    return result
 
 
 async def ingest_latest_heliophysics(
