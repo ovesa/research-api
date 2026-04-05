@@ -362,7 +362,6 @@ async def ingest_specific_ids(arxiv_ids: list[str]):
         "arxiv_ids": result.arxiv_ids,
     }
 
-
 @router.get(
     "/health",
     summary="Health check",
