@@ -21,6 +21,11 @@ from app.services.database import (
     search_papers,
 )
 from app.services.fetcher import fetch_by_arxiv, fetch_by_doi
+from app.services.ingestion import (
+    IngestionResult,
+    ingest_by_ids,
+    ingest_latest_heliophysics,
+)
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
@@ -291,6 +296,71 @@ async def get_metrics():
         misses=_cache_misses,
         hit_rate=round(hit_rate, 4),
     )
+
+
+@router.post(
+    "/ingest/arxiv",
+    summary="Collect latest heliophysics papers from arXiv",
+)
+async def ingest_from_arxiv(max_per_category: int = 25):
+    """Fetch and store the latest heliophysics papers from arXiv.
+
+    Searches all heliophysics arXiv categories concurrently, deduplicates
+    results, skips papers already stored, and fetches new ones with rate
+    limiting to respect arXiv's guidelines.
+
+    This endpoint can take several minutes to complete depending on how
+    many new papers are found. In production this would be triggered by
+    a scheduled job rather than a direct API call.
+
+    Args:
+        max_per_category (int): Maximum papers to fetch per arXiv
+            category. Defaults to 25. Total will be at most
+            max_per_category * 3 categories minus duplicates.
+
+    Returns:
+        dict: Ingestion summary including total found, newly ingested,
+            already stored, rejected, and failed counts plus the list
+            of newly ingested arXiv IDs.
+    """
+    result = await ingest_latest_heliophysics(max_per_category=max_per_category)
+    return {
+        "total_found": result.total_found,
+        "newly_ingested": result.newly_ingested,
+        "already_stored": result.already_stored,
+        "rejected": result.rejected,
+        "failed": result.failed,
+        "arxiv_ids": result.arxiv_ids,
+    }
+
+
+@router.post(
+    "/ingest/ids",
+    summary="Collect a specific list of arXiv papers",
+)
+async def ingest_specific_ids(arxiv_ids: list[str]):
+    """Fetch and store a specific list of arXiv papers by ID.
+
+    Useful when you have a curated list of papers to add rather than
+    pulling the latest from arXiv categories. Skips papers already
+    in Postgres.
+
+    Args:
+        arxiv_ids (list[str]): List of arXiv IDs to ingest.
+            e.g. ['2509.19847', '2301.04380']
+
+    Returns:
+        dict: Ingestion summary with counts and newly ingested IDs.
+    """
+    result = await ingest_by_ids(arxiv_ids)
+    return {
+        "total_found": result.total_found,
+        "newly_ingested": result.newly_ingested,
+        "already_stored": result.already_stored,
+        "rejected": result.rejected,
+        "failed": result.failed,
+        "arxiv_ids": result.arxiv_ids,
+    }
 
 
 @router.get(
