@@ -20,9 +20,8 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
     """Check if a paper is heliophysics-related using keyword matching.
 
     Used as a fallback for DOI lookups where the journal is not on the
-    heliophysics whitelist. Broad journals like Nature or ApJ
-    publish heliophysics papers so journal matching alone is not
-    sufficient.
+    heliophysics whitelist. Broad journals like Nature or ApJ publish
+    heliophysics papers so journal matching alone is not sufficient.
 
     Args:
         title (str): The paper title.
@@ -52,6 +51,24 @@ def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
     return journal.lower().strip() in HELIOPHYSICS_JOURNALS
 
 
+def _make_client() -> httpx.AsyncClient:
+    """Create a configured httpx async client for external API calls.
+
+    Centralizes client configuration so all external requests use the
+    same timeout, redirect, and header settings. arXiv requires https
+    and follows redirects. A descriptive User-Agent is good practice
+    and helps API maintainers identify traffic sources.
+
+    Returns:
+        httpx.AsyncClient: Configured client ready for use as a context manager.
+    """
+    return httpx.AsyncClient(
+        timeout=settings.external_api_timeout,
+        follow_redirects=True,
+        headers={"User-Agent": "research-api/0.1 (heliophysics paper lookup)"},
+    )
+
+
 async def _fetch_crossref(client: httpx.AsyncClient, doi: str) -> dict:
     """Fetch paper metadata from the CrossRef API by DOI.
 
@@ -79,15 +96,18 @@ async def _fetch_crossref(client: httpx.AsyncClient, doi: str) -> dict:
 
 async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
     """Fetch paper metadata from the arXiv API by arXiv ID.
-    see https://info.arxiv.org/help/api/index.html.
 
-    arXiv is the primary source for preprint lookups. It returns
-    title, authors, abstract, and subject categories. The categories
-    are used for heliophysics domain validation.
+    See https://info.arxiv.org/help/api/index.html for API documentation.
+    arXiv is the primary source for preprint lookups. It returns title,
+    authors, abstract, and subject categories. The categories are used
+    for heliophysics domain validation.
+
+    arXiv returns Atom XML: this function parses it manually to avoid
+    pulling in a heavy XML parsing dependency.
 
     Args:
         client (httpx.AsyncClient): The shared HTTP client for this request.
-        arxiv_id (str): The arXiv ID to look up. e.g. 2103.08049
+        arxiv_id (str): The arXiv ID to look up. e.g. 2301.04380
 
     Returns:
         dict: Parsed arXiv entry as a dict, or an empty dict if the
@@ -97,39 +117,58 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
         clean_id = arxiv_id.replace("arxiv:", "").strip()
         url = f"https://export.arxiv.org/api/query?id_list={clean_id}"
         response = await client.get(url)
+
         if response.status_code != 200:
             return {}
 
-        # arXiv returns XML
         text = response.text
+
         if "<entry>" not in text:
             return {}
 
         def extract(tag: str) -> str:
+            """Extract text content between an XML tag pair.
+
+            Args:
+                tag (str): The XML tag name to extract content from.
+
+            Returns:
+                str: The text content between the tags, or empty string
+                    if the tag is not found.
+            """
             start = text.find(f"<{tag}>")
             end = text.find(f"</{tag}>")
             if start == -1 or end == -1:
                 return ""
             return text[start + len(tag) + 2 : end].strip()
 
-        # Extract all authors
+        # Extract all author names
         authors = []
         remaining = text
         while "<author>" in remaining:
             start = remaining.find("<author>")
             end = remaining.find("</author>")
+            if end == -1:
+                break
             author_block = remaining[start:end]
-            name = author_block.split("<name>")[1].split("</name>")[0].strip()
-            authors.append(name)
+            if "<name>" in author_block and "</name>" in author_block:
+                name = author_block.split("<name>")[1].split("</name>")[0].strip()
+                authors.append(name)
             remaining = remaining[end + 9 :]
 
-        # Extract categories
+        # Extract arXiv subject categories from term attributes
+        # e.g. <category term="astro-ph.SR" scheme="..."/>
         categories = []
         remaining = text
         while 'term="' in remaining:
             start = remaining.find('term="') + 6
             end = remaining.find('"', start)
-            categories.append(remaining[start:end])
+            if end == -1:
+                break
+            term = remaining[start:end]
+            # Filter out scheme URLs that also contain term=" pattern
+            if not term.startswith("http"):
+                categories.append(term)
             remaining = remaining[end + 1 :]
 
         return {
@@ -139,6 +178,7 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
             "categories": categories,
             "published": extract("published"),
         }
+
     except Exception:
         return {}
 
@@ -150,7 +190,7 @@ async def _fetch_semantic_scholar(
 
     Semantic Scholar is used exclusively for citation counts which are
     not available from CrossRef or arXiv directly. It accepts both DOIs
-    and arXiv IDs.
+    and arXiv IDs. DOI is preferred when available.
 
     Args:
         client (httpx.AsyncClient): The shared HTTP client for this request.
@@ -174,6 +214,7 @@ async def _fetch_semantic_scholar(
             data = response.json()
             return {"citation_count": data.get("citationCount")}
         return {}
+
     except Exception:
         return {}
 
@@ -240,6 +281,7 @@ def _normalize_crossref(
         fetched_at=datetime.now(timezone.utc),
     )
 
+
 def _normalize_arxiv(
     arxiv_id: str, data: dict, citation_count: Optional[int]
 ) -> PaperMetadata:
@@ -247,7 +289,7 @@ def _normalize_arxiv(
 
     Args:
         arxiv_id (str): The arXiv ID that was looked up.
-        data (dict): The parsed arXiv entry dict.
+        data (dict): The parsed arXiv entry dict from _fetch_arxiv.
         citation_count (int | None): Citation count from Semantic Scholar.
 
     Returns:
@@ -286,11 +328,10 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
         doi (str): The DOI to look up. e.g. 10.1038/nature12373
 
     Returns:
-        PaperMetadata: Normalized metadata if the paper is heliophysics-related.
-        DomainValidationError: Rejection details if the paper does not match.
+        PaperMetadata: Normalized metadata if paper is heliophysics-related.
+        DomainValidationError: Rejection details if paper does not match.
     """
-    async with httpx.AsyncClient(timeout=settings.external_api_timeout) as client:
-        # Hit CrossRef and Semantic Scholar at the same time
+    async with _make_client() as client:
         crossref_data, semantic_data = await asyncio.gather(
             _fetch_crossref(client, doi),
             _fetch_semantic_scholar(client, doi, None),
@@ -310,7 +351,7 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     abstract = crossref_data.get("abstract")
     citation_count = semantic_data.get("citation_count")
 
-    # Validate heliophysics relevance
+    # Validate heliophysics relevance — journal first, keywords as fallback
     if not _is_heliophysics_by_journal(journal):
         if not _is_heliophysics_by_keywords(title or "", abstract):
             return DomainValidationError(
@@ -334,16 +375,15 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     before returning. Rejects papers outside heliophysics categories.
 
     Args:
-        arxiv_id (str): The arXiv ID to look up. e.g. 2103.08049
+        arxiv_id (str): The arXiv ID to look up. e.g. 2301.04380
 
     Returns:
-        PaperMetadata: Normalized metadata if the paper is heliophysics-related.
-        DomainValidationError: Rejection details if the paper does not match.
+        PaperMetadata: Normalized metadata if paper is heliophysics-related.
+        DomainValidationError: Rejection details if paper does not match.
     """
     clean_id = arxiv_id.replace("arxiv:", "").strip()
 
-    async with httpx.AsyncClient(timeout=settings.external_api_timeout) as client:
-        # Hit arXiv and Semantic Scholar at the same time
+    async with _make_client() as client:
         arxiv_data, semantic_data = await asyncio.gather(
             _fetch_arxiv(client, clean_id),
             _fetch_semantic_scholar(client, None, clean_id),
@@ -358,7 +398,6 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     categories = arxiv_data.get("categories", [])
     citation_count = semantic_data.get("citation_count")
 
-    # Validate heliophysics relevance by arXiv category
     matching_categories = [c for c in categories if c in HELIOPHYSICS_ARXIV_CATEGORIES]
 
     if not matching_categories:
