@@ -157,8 +157,10 @@ async def bulk_lookup(request: BulkLookupRequest):
         # (3) External APIs
         if request.identifier_type == IdentifierType.doi:
             result = await fetch_by_doi(identifier)
-        else:
+        elif request.identifier_type == IdentifierType.arxiv:
             result = await fetch_by_arxiv(identifier)
+        else:
+            result = await fetch_by_ads(identifier)
 
         await cache_paper(identifier, json.dumps(result.model_dump(), default=str))
 
