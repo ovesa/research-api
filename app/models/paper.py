@@ -5,9 +5,9 @@ from enum import Enum
 
 # arXiv categories relevant to heliophysics
 HELIOPHYSICS_ARXIV_CATEGORIES = {
-    "astro-ph.SR",      # Solar and Stellar Astrophysics
-    "physics.space-ph", # Space Physics
-    "astro-ph.EP",      # Earth and Planetary Astrophysics (solar wind effects)
+    "astro-ph.SR",  # Solar and Stellar Astrophysics
+    "physics.space-ph",  # Space Physics
+    "astro-ph.EP",  # Earth and Planetary Astrophysics (solar wind effects)
 }
 
 # Journals that publish heliophysics research
@@ -16,13 +16,9 @@ HELIOPHYSICS_JOURNALS = {
     "the astrophysical journal letters",
     "the astrophysical journal supplement series",
     "astronomy and astrophysics",
-    "journal of geophysical research",
-    "journal of geophysical research: space physics",
-    "geophysical research letters",
     "solar physics",
     "space weather",
-    "annales geophysicae",
-    "earth and planetary science letters",
+    "nature",
     "nature astronomy",
     "monthly notices of the royal astronomical society",
 }
@@ -53,8 +49,9 @@ HELIOPHYSICS_KEYWORDS = {
     "HMI",
     "DKIST",
     "solar dynamo",
-    "inertial modes"  
+    "inertial modes",
 }
+
 
 class IdentifierType(str, Enum):
     """The two supported paper identifier formats.
@@ -63,6 +60,7 @@ class IdentifierType(str, Enum):
         doi: Digital Object Identifier. e.g. 10.1038/nature12373
         arxiv: arXiv preprint ID. e.g. 2103.08049 or arxiv:2103.08049
     """
+
     doi = "doi"
     arxiv = "arxiv"
 
@@ -81,6 +79,7 @@ class Author(BaseModel):
         orcid (str | None): ORCID identifier if available. Uniquely
             identifies a researcher across institutions.
     """
+
     name: str
     affiliation: Optional[str] = None
     orcid: Optional[str] = None
@@ -116,6 +115,7 @@ class PaperMetadata(BaseModel):
             domain validation. Always True for stored papers — included
             for transparency in the response.
     """
+
     identifier: str
     identifier_type: IdentifierType
     title: str
@@ -144,6 +144,7 @@ class PaperLookupRequest(BaseModel):
         {"identifier": "10.1038/nature12373", "identifier_type": "doi"}
         {"identifier": "2103.08049", "identifier_type": "arxiv"}
     """
+
     identifier: str
     identifier_type: IdentifierType
 
@@ -178,6 +179,7 @@ class BulkLookupRequest(BaseModel):
         identifier_type (IdentifierType): The type that applies to all
             identifiers in the list.
     """
+
     identifiers: list[str]
     identifier_type: IdentifierType
 
@@ -214,6 +216,7 @@ class CacheStats(BaseModel):
         misses (int): Number of requests that required external API calls.
         hit_rate (float): Ratio of hits to total requests between 0 and 1.
     """
+
     hits: int
     misses: int
     hit_rate: float
@@ -228,6 +231,7 @@ class DomainValidationError(BaseModel):
         title (str | None): The paper title if it was retrievable before
             rejection. Helps the user confirm they submitted the right paper.
     """
+
     identifier: str
     reason: str
     title: Optional[str] = None
