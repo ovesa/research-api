@@ -14,6 +14,9 @@ from app.models.paper import (
     IdentifierType,
     PaperMetadata,
 )
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
@@ -338,13 +341,24 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
         PaperMetadata: Normalized metadata if paper is heliophysics-related.
         DomainValidationError: Rejection details if paper does not match.
     """
+    import time
+
+    log = logger.bind(identifier=doi, identifier_type="doi")
+    log.info("fetch_started")
+    start = time.perf_counter()
+
     async with _make_client() as client:
         crossref_data, semantic_data = await asyncio.gather(
             _fetch_crossref(client, doi),
             _fetch_semantic_scholar(client, doi, None),
         )
 
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
     if not crossref_data:
+        log.warning(
+            "fetch_failed", reason="DOI not found in CrossRef", duration_ms=duration_ms
+        )
         return DomainValidationError(
             identifier=doi,
             reason="DOI not found in CrossRef.",
@@ -358,9 +372,13 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     abstract = crossref_data.get("abstract")
     citation_count = semantic_data.get("citation_count")
 
-    # Validate heliophysics relevance — journal first, keywords as fallback
     if not _is_heliophysics_by_journal(journal):
         if not _is_heliophysics_by_keywords(title or "", abstract):
+            log.warning(
+                "heliophysics_validation_failed",
+                journal=journal,
+                duration_ms=duration_ms,
+            )
             return DomainValidationError(
                 identifier=doi,
                 reason=(
@@ -371,6 +389,7 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
                 title=title,
             )
 
+    log.info("fetch_complete", duration_ms=duration_ms, source="crossref")
     return _normalize_crossref(doi, crossref_data, citation_count)
 
 
@@ -388,7 +407,12 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
         PaperMetadata: Normalized metadata if paper is heliophysics-related.
         DomainValidationError: Rejection details if paper does not match.
     """
+    import time
+
     clean_id = arxiv_id.replace("arxiv:", "").strip()
+    log = logger.bind(identifier=clean_id, identifier_type="arxiv")
+    log.info("fetch_started")
+    start = time.perf_counter()
 
     async with _make_client() as client:
         arxiv_data, semantic_data = await asyncio.gather(
@@ -396,7 +420,12 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
             _fetch_semantic_scholar(client, None, clean_id),
         )
 
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
     if not arxiv_data:
+        log.warning(
+            "fetch_failed", reason="arXiv ID not found", duration_ms=duration_ms
+        )
         return DomainValidationError(
             identifier=arxiv_id,
             reason="arXiv ID not found.",
@@ -405,17 +434,19 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     categories = arxiv_data.get("categories", [])
     citation_count = semantic_data.get("citation_count")
 
-    # Primary category is the first in the list — arXiv authors set this deliberately
     primary_category = categories[0] if categories else ""
     matching_categories = [c for c in categories if c in HELIOPHYSICS_ARXIV_CATEGORIES]
 
-    # Require either the primary category to be heliophysics
-    # or at least two heliophysics categories to avoid edge cases
-    # like this paper where astro-ph.SR is a minor secondary tag
     if (
         primary_category not in HELIOPHYSICS_ARXIV_CATEGORIES
         and len(matching_categories) < 2
     ):
+        log.warning(
+            "heliophysics_validation_failed",
+            primary_category=primary_category,
+            categories=categories,
+            duration_ms=duration_ms,
+        )
         return DomainValidationError(
             identifier=arxiv_id,
             reason=(
@@ -426,4 +457,5 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
             title=arxiv_data.get("title"),
         )
 
+    log.info("fetch_complete", duration_ms=duration_ms, source="arxiv")
     return _normalize_arxiv(clean_id, arxiv_data, citation_count)
