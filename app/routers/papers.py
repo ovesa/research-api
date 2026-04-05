@@ -25,6 +25,7 @@ from app.services.ingestion import (
     IngestionResult,
     ingest_by_ids,
     ingest_date_range,
+    ingest_from_ads,
     ingest_latest_heliophysics,
 )
 
@@ -406,6 +407,56 @@ async def ingest_date_range_endpoint(
         "rejected": result.rejected,
         "failed": result.failed,
         "arxiv_ids": result.arxiv_ids,
+    }
+
+
+@router.post(
+    "/ingest/ads",
+    summary="Ingest heliophysics papers from NASA ADS",
+)
+async def ingest_from_ads_endpoint(
+    start_date: str = Query(
+        ..., description="Start date in YYYY-MM format e.g. 2025-01"
+    ),
+    end_date: str = Query(..., description="End date in YYYY-MM format e.g. 2025-03"),
+    max_results: int = Query(default=100),
+    keywords: str = Query(
+        default=(
+                    "inertial modes OR rossby waves OR helioseismology"
+
+        ),
+    ),
+):
+    """Ingest heliophysics papers from NASA ADS within a date range.
+
+    Searches ADS across core heliophysics journals for papers published
+    between the given dates. ADS is preferred over arXiv for published
+    papers because it has explicit journal coverage and richer metadata.
+
+    Args:
+        start_date (str): Start date in YYYY-MM format. e.g. '2025-01'
+        end_date (str): End date in YYYY-MM format. e.g. '2025-03'
+        max_results (int): Maximum papers to retrieve. Defaults to 100.
+        keywords (str): Search keywords. Defaults to core heliophysics terms.
+
+    Returns:
+        dict: Ingestion summary with counts and newly ingested bibcodes.
+    """
+    result = await ingest_from_ads(
+        start_date=start_date,
+        end_date=end_date,
+        keywords=keywords,
+        max_results=max_results,
+    )
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_found": result.total_found,
+        "newly_ingested": result.newly_ingested,
+        "already_stored": result.already_stored,
+        "rejected": result.rejected,
+        "failed": result.failed,
+        "bibcodes": result.arxiv_ids,
     }
 
 

@@ -50,7 +50,16 @@ HELIOPHYSICS_KEYWORDS = {
     "DKIST",
     "solar dynamo",
     "inertial modes",
-}
+    "helioseismology",
+    "solar oscillation",
+    "solar oscillations",
+    "p-mode",
+    "g-mode",
+    "f-mode",
+    "power spectrum",
+    "doppler velocity",
+    "eigenfrequency",
+    }
 
 
 class IdentifierType(str, Enum):
