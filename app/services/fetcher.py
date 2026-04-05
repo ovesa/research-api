@@ -310,6 +310,9 @@ def _normalize_arxiv(
     published = data.get("published", "")
     published_date = published[:10] if published else None
 
+    clean = arxiv_id.replace("arxiv:", "").strip()
+    arxiv_url = f"https://arxiv.org/abs/{clean}"
+
     return PaperMetadata(
         identifier=arxiv_id,
         identifier_type=IdentifierType.arxiv,
@@ -319,11 +322,12 @@ def _normalize_arxiv(
         published_date=published_date,
         journal=None,
         doi=None,
-        arxiv_id=arxiv_id.replace("arxiv:", "").strip(),
+        arxiv_id=clean,
         arxiv_categories=data.get("categories", []),
         citation_count=citation_count,
         source="arxiv",
         fetched_at=datetime.now(timezone.utc),
+        url=arxiv_url,
     )
 
 

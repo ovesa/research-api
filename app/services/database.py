@@ -29,9 +29,9 @@ async def save_paper(paper: PaperMetadata) -> None:
             INSERT INTO papers (
                 identifier, identifier_type, title, authors, abstract,
                 published_date, journal, doi, arxiv_id, arxiv_categories,
-                citation_count, source, fetched_at
+                citation_count, source, fetched_at, url
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (identifier) DO NOTHING
             """,
             paper.identifier,
