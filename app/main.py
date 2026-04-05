@@ -1,11 +1,18 @@
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 
 from app.cache import close_redis, get_redis
 from app.config import settings
 from app.database import close_pool, get_pool
+from app.logging_config import setup_logging
+from app.middleware import RequestLoggingMiddleware
 from app.routers import papers
+
+# Set up logging before anything else
+setup_logging(debug=settings.debug)
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -13,21 +20,11 @@ async def lifespan(app: FastAPI):
     """Manage startup and shutdown of shared resources.
 
     FastAPI calls everything before the yield on startup and everything
-    after the yield on shutdown.
-
-    Startup:
-        Warms up the Postgres connection pool and Redis client so the
-        first request does not pay the connection cost. Without this,
-        the first request after a cold start would be noticeably slower.
-
-    Shutdown:
-        Closes all Postgres connections and the Redis client cleanly.
-        Without this, connections remain open on the server side after
-        the app exits which can cause issues on frequent restarts.
+    after the yield on shutdown. Warms up Postgres and Redis connections
+    so the first request does not pay the connection cost.
 
     Args:
-        app (FastAPI): The FastAPI application instance. Not used directly
-            but required by the lifespan protocol.
+        app (FastAPI): The FastAPI application instance.
 
     Yields:
         None: Control is yielded to FastAPI to handle requests.
@@ -35,28 +32,34 @@ async def lifespan(app: FastAPI):
     # Startup
     await get_pool()
     await get_redis()
-    print(f"*** {settings.app_name} started ***")
-    print(f"*** Debug mode: {settings.debug} ***")
+    logger.info(
+        "application_started",
+        app_name=settings.app_name,
+        debug=settings.debug,
+    )
 
     yield
 
     # Shutdown
     await close_pool()
     await close_redis()
-    print(f"*** {settings.app_name} shut down ***")
+    logger.info("application_stopped", app_name=settings.app_name)
 
 
 app = FastAPI(
     title=settings.app_name,
     description=(
-        "A paper metadata API focusing on heliophysics/solar physics. "
+        "A heliophysics research paper metadata API. "
         "Look up papers by DOI or arXiv ID and get normalized metadata "
         "including authors, abstracts, citation counts, and more. "
-        "Only heliophysics-related papers are accepted based on keywords."
+        "Only heliophysics-related papers are accepted."
     ),
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Add request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(papers.router)
 
@@ -64,10 +67,6 @@ app.include_router(papers.router)
 @app.get("/health/live", tags=["health"])
 async def liveness():
     """Confirm the application process is running.
-
-    Used by container orchestrators like Kubernetes to know whether
-    to restart the container. If this endpoint is unreachable the
-    container is considered dead.
 
     Returns:
         dict: Static ok status.
@@ -81,8 +80,6 @@ async def readiness():
 
     Checks that both Postgres and Redis are reachable. Used by container
     orchestrators to know whether to send traffic to this instance.
-    Unlike liveness, a failed readiness check does not restart the
-    container. It just stops sending it traffic until it recovers.
 
     Returns:
         dict: Status ok with confirmation that both services are connected.
