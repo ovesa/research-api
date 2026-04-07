@@ -272,3 +272,65 @@ async def search_papers(
         )
 
     return [_row_to_paper(row) for row in rows], total
+
+async def filter_papers_by_keywords(
+    keywords: list[str],
+    match_all: bool = False,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[PaperMetadata], int]:
+    """Filter stored papers by explicit keywords in title or abstract.
+
+    Unlike full text search, this does exact substring matching (case-
+    insensitive) against each keyword. Useful when you want papers that
+    specifically contain a term like 'inertial modes' without stemming
+    or relevance ranking changing your results.
+
+    Args:
+        keywords (list[str]): Keywords to filter by.
+            e.g. ['inertial modes', 'rossby waves']
+        match_all (bool): If True, paper must contain ALL keywords.
+            If False, paper must contain AT LEAST ONE. Defaults to False.
+        limit (int): Maximum number of results to return. Defaults to 20.
+        offset (int): Number of results to skip for pagination.
+
+    Returns:
+        tuple[list[PaperMetadata], int]: Matching papers and total count.
+    """
+    pool = await get_pool()
+
+    if not keywords:
+        return [], 0
+
+    # ILIKE condition per keyword against title + abstract
+    conditions = []
+    params: list = []
+    for i, kw in enumerate(keywords, start=1):
+        conditions.append(
+            f"(title ILIKE ${i} OR abstract ILIKE ${i})"
+        )
+        params.append(f"%{kw}%")
+
+    joiner = " AND " if match_all else " OR "
+    where_clause = f"WHERE ({joiner.join(conditions)})"
+
+    count_param_index = len(params) + 1
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT * FROM papers
+            {where_clause}
+            ORDER BY fetched_at DESC
+            LIMIT ${count_param_index} OFFSET ${count_param_index + 1}
+            """,
+            *params,
+            limit,
+            offset,
+        )
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM papers {where_clause}",
+            *params,
+        )
+
+    return [_row_to_paper(row) for row in rows], total

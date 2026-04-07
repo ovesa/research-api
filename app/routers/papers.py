@@ -14,6 +14,7 @@ from app.models.paper import (
     PaperMetadata,
 )
 from app.services.database import (
+    filter_papers_by_keywords,
     get_paper,
     get_stats,
     list_papers,
@@ -264,6 +265,65 @@ async def search(
 
 
 @router.get(
+    "/filter",
+    summary="Filter papers by specific keywords",
+)
+async def filter_by_keywords(
+    keywords: str = Query(
+        ...,
+        description="Comma-separated keywords e.g. 'inertial modes,rossby waves,helioseismology'",
+    ),
+    match_all: bool = Query(
+        default=False,
+        description="If true, paper must contain ALL keywords. If false, ANY keyword matches.",
+    ),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """Filter stored papers by one or more explicit keywords.
+
+    Uses case-insensitive substring matching against title and abstract.
+    Unlike /search, there is no stemming or relevance ranking. It is also
+    case insensitive.
+
+    Args:
+        keywords (str): Comma-separated list of keywords to filter by.
+        match_all (bool): If True, only papers containing ALL keywords
+            are returned. If False, papers containing ANY keyword match.
+            Defaults to False.
+        limit (int): Number of results to return. Between 1 and 100.
+        offset (int): Number of results to skip for pagination.
+
+    Returns:
+        dict: Matching papers, total count, and the parsed keyword list.
+
+    Example:
+        GET /papers/filter?keywords=inertial+modes,rossby+waves
+        GET /papers/filter?keywords=helioseismology,solar+wind&match_all=true
+    """
+    parsed = [kw.strip() for kw in keywords.split(",") if kw.strip()]
+
+    if not parsed:
+        raise HTTPException(status_code=400, detail="At least one keyword is required")
+
+    papers, total = await filter_papers_by_keywords(
+        keywords=parsed,
+        match_all=match_all,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "keywords": parsed,
+        "match_all": match_all,
+        "papers": [p.model_dump() for p in papers],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
     "/stats",
     summary="Collection statistics",
 )
@@ -421,10 +481,7 @@ async def ingest_from_ads_endpoint(
     end_date: str = Query(..., description="End date in YYYY-MM format e.g. 2025-03"),
     max_results: int = Query(default=100),
     keywords: str = Query(
-        default=(
-                    "inertial modes OR rossby waves OR helioseismology"
-
-        ),
+        default=("inertial modes OR rossby waves OR helioseismology"),
     ),
 ):
     """Ingest heliophysics papers from NASA ADS within a date range.
