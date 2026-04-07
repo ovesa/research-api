@@ -23,7 +23,6 @@ from app.services.database import (
 )
 from app.services.fetcher import fetch_by_ads, fetch_by_arxiv, fetch_by_doi
 from app.services.ingestion import (
-    IngestionResult,
     ingest_by_ids,
     ingest_date_range,
     ingest_from_ads,
