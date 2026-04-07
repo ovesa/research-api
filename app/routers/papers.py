@@ -217,6 +217,14 @@ async def list_all_papers(
     offset: int = Query(default=0, ge=0),
     identifier_type: Optional[str] = Query(default=None),
     source: Optional[str] = Query(default=None),
+    sort_by: str = Query(
+        default="fetched_at",
+        description="Field to sort by. One of: fetched_at, published_date, citation_count, title",
+    ),
+    sort_order: str = Query(
+        default="desc",
+        description="Sort direction: asc or desc",
+    ),
 ):
     """List all papers stored in Postgres with pagination and filtering.
 
@@ -230,11 +238,26 @@ async def list_all_papers(
         dict: Contains papers list, total count, limit, and offset
             for the client to construct pagination.
     """
+    # Whitelist allowed sort fields to prevent SQL injection
+    allowed_sort_fields = {"fetched_at", "published_date", "citation_count", "title"}
+    if sort_by not in allowed_sort_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sort_by field. Must be one of: {', '.join(sorted(allowed_sort_fields))}",
+        )
+    if sort_order.lower() not in ("asc", "desc"):
+        raise HTTPException(
+            status_code=400,
+            detail="sort_order must be 'asc' or 'desc'",
+        )
+
     papers, total = await list_papers(
         limit=limit,
         offset=offset,
         identifier_type=identifier_type,
         source=source,
+        sort_by=sort_by,
+        sort_order=sort_order.lower(),
     )
     return {
         **pagination_meta(total, limit, offset),
