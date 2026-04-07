@@ -62,7 +62,8 @@ HELIOPHYSICS_KEYWORDS = {
     "power spectrum",
     "doppler velocity",
     "eigenfrequency",
-    }
+}
+
 
 class IdentifierType(str, Enum):
     """The supported paper identifier formats.
@@ -146,7 +147,7 @@ class PaperMetadata(BaseModel):
     source: str
     fetched_at: datetime
     is_heliophysics: bool = True
-    url: Optional[str] = None  
+    url: Optional[str] = None
 
 
 class PaperLookupRequest(BaseModel):
@@ -252,3 +253,31 @@ class DomainValidationError(BaseModel):
     identifier: str
     reason: str
     title: Optional[str] = None
+
+
+class PaperPatchRequest(BaseModel):
+    """Request body for partially updating a stored paper.
+
+    All fields are optional. Only the fields provided will be updated.
+    System-managed fields (identifier, identifier_type, source,
+    fetched_at, is_heliophysics) cannot be changed via this endpoint.
+
+    Attributes:
+        title (str | None): Corrected paper title.
+        abstract (str | None): Full abstract text.
+        url (str | None): Direct link to the paper.
+        doi (str | None): Digital Object Identifier.
+        arxiv_id (str | None): arXiv preprint ID.
+        journal (str | None): Journal or conference name.
+        citation_count (int | None): Manual citation count override.
+        published_date (str | None): Publication date string.
+    """
+
+    title: Optional[str] = None
+    abstract: Optional[str] = None
+    url: Optional[str] = None
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    journal: Optional[str] = None
+    citation_count: Optional[int] = None
+    published_date: Optional[str] = None
