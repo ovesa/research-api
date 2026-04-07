@@ -1,7 +1,9 @@
 import json
 from datetime import datetime, timezone
 from typing import Optional, Union
-
+from fastapi import APIRouter, HTTPException, Query, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from fastapi import APIRouter, HTTPException, Query
 
 from app.cache import cache_paper, get_cached_paper
@@ -33,7 +35,7 @@ from app.services.ingestion import (
 )
 
 router = APIRouter(prefix="/papers", tags=["papers"])
-
+limiter = Limiter(key_func=get_remote_address)
 # In-memory cache hit/miss counters
 # In production these would live in Redis so they persist across restarts
 _cache_hits = 0
@@ -76,7 +78,8 @@ def pagination_meta(total: int, limit: int, offset: int) -> dict:
     response_model=Union[PaperMetadata, DomainValidationError],
     summary="Look up a single heliophysics paper",
 )
-async def lookup_paper(request: PaperLookupRequest):
+@limiter.limit("30/minute")
+async def lookup_paper(request: Request, request_body: PaperLookupRequest):
     """Look up a single paper by DOI or arXiv ID.
 
     Checks three layers in order before hitting external APIs:
@@ -99,7 +102,7 @@ async def lookup_paper(request: PaperLookupRequest):
     global _cache_hits, _cache_misses
 
     # (1) Redis cache
-    cached = await get_cached_paper(request.identifier)
+    cached = await get_cached_paper(request_body.identifier)
     if cached:
         _cache_hits += 1
         data = json.loads(cached)
@@ -108,27 +111,28 @@ async def lookup_paper(request: PaperLookupRequest):
         return DomainValidationError(**data)
 
     # (2) Postgres
-    stored = await get_paper(request.identifier)
+    stored = await get_paper(request_body.identifier)
     if stored:
         _cache_hits += 1
         # Re-populate Redis so next request is even faster
         await cache_paper(
-            request.identifier, json.dumps(stored.model_dump(), default=str)
+            request_body.identifier, json.dumps(stored.model_dump(), default=str)
         )
         return stored
 
     _cache_misses += 1
 
     # (3) External APIs
-    if request.identifier_type == IdentifierType.doi:
-        result = await fetch_by_doi(request.identifier)
-    elif request.identifier_type == IdentifierType.arxiv:
-        result = await fetch_by_arxiv(request.identifier)
+    if request_body.identifier_type == IdentifierType.doi:
+        result = await fetch_by_doi(request_body.identifier)
+    elif request_body.identifier_type == IdentifierType.arxiv:
+        result = await fetch_by_arxiv(request_body.identifier)
     else:
-        result = await fetch_by_ads(request.identifier)
+        result = await fetch_by_ads(request_body.identifier)
     # Cache the result regardless of validation outcome
-    # This prevents hammering external APIs with repeated invalid lookups
-    await cache_paper(request.identifier, json.dumps(result.model_dump(), default=str))
+    await cache_paper(
+        request_body.identifier, json.dumps(result.model_dump(), default=str)
+    )
 
     # Only save to Postgres if the paper passed heliophysics validation
     if isinstance(result, PaperMetadata):

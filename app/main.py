@@ -10,6 +10,10 @@ from app.logging_config import setup_logging
 from app.middleware import RequestLoggingMiddleware
 from app.routers import papers
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 # Set up logging before anything else
 setup_logging(debug=settings.debug)
 logger = structlog.get_logger(__name__)
@@ -46,6 +50,8 @@ async def lifespan(app: FastAPI):
     logger.info("application_stopped", app_name=settings.app_name)
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title=settings.app_name,
     description=(
@@ -57,6 +63,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
