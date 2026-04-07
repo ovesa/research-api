@@ -40,6 +40,37 @@ _cache_hits = 0
 _cache_misses = 0
 
 
+def pagination_meta(total: int, limit: int, offset: int) -> dict:
+    """Calculate pagination metadata for list responses.
+
+    Args:
+        total (int): Total number of matching records.
+        limit (int): Page size.
+        offset (int): Current offset.
+
+    Returns:
+        dict: Pagination metadata including page counts and nav flags.
+    """
+    import math
+
+    total_pages = math.ceil(total / limit) if total > 0 else 1
+    current_page = (offset // limit) + 1
+    has_next = offset + limit < total
+    has_prev = offset > 0
+
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "total_pages": total_pages,
+        "current_page": current_page,
+        "has_next": has_next,
+        "has_prev": has_prev,
+        "next_offset": offset + limit if has_next else None,
+        "prev_offset": max(offset - limit, 0) if has_prev else None,
+    }
+
+
 @router.post(
     "/lookup",
     response_model=Union[PaperMetadata, DomainValidationError],
@@ -206,10 +237,8 @@ async def list_all_papers(
         source=source,
     )
     return {
+        **pagination_meta(total, limit, offset),
         "papers": [p.model_dump() for p in papers],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
     }
 
 
@@ -259,10 +288,8 @@ async def search(
 
     return {
         "query": q.strip(),
+        **pagination_meta(total, limit, offset),
         "papers": [p.model_dump() for p in papers],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
     }
 
 
@@ -318,10 +345,8 @@ async def filter_by_keywords(
     return {
         "keywords": parsed,
         "match_all": match_all,
+        **pagination_meta(total, limit, offset),
         "papers": [p.model_dump() for p in papers],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
     }
 
 
