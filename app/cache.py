@@ -3,6 +3,7 @@ from app.config import settings
 
 redis = None
 
+
 async def get_redis():
     """Return the shared async Redis client, creating it on first call.
 
@@ -16,11 +17,10 @@ async def get_redis():
     global redis
     if redis is None:
         redis = aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True
+            settings.redis_url, encoding="utf-8", decode_responses=True
         )
     return redis
+
 
 async def get_cached_paper(identifier: str) -> str | None:
     """Look up a paper in Redis by its identifier.
@@ -33,6 +33,7 @@ async def get_cached_paper(identifier: str) -> str | None:
     """
     client = await get_redis()
     return await client.get(f"paper:{identifier}")
+
 
 async def cache_paper(identifier: str, data: str) -> None:
     """Store a paper's JSON representation in Redis with a TTL.
@@ -49,11 +50,24 @@ async def cache_paper(identifier: str, data: str) -> None:
         None
     """
     client = await get_redis()
-    await client.setex(
-        f"paper:{identifier}",
-        settings.cache_ttl_seconds,
-        data
-    )
+    await client.setex(f"paper:{identifier}", settings.cache_ttl_seconds, data)
+
+
+async def delete_cached_paper(identifier: str) -> None:
+    """Remove a paper from the Redis cache by its identifier.
+
+    Called after a paper is deleted from Postgres to ensure stale
+    data is not served from cache after deletion.
+
+    Args:
+        identifier (str): The DOI or arXiv ID used as the cache key.
+
+    Returns:
+        None
+    """
+    client = await get_redis()
+    await client.delete(f"paper:{identifier}")
+
 
 async def close_redis():
     """Close the Redis connection cleanly on app shutdown.
