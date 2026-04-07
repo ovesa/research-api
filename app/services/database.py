@@ -77,6 +77,33 @@ async def get_paper(identifier: str) -> Optional[PaperMetadata]:
     return _row_to_paper(row)
 
 
+async def delete_paper(identifier: str) -> bool:
+    """Delete a single paper from Postgres by identifier.
+
+    Used when a paper needs to be removed from the collection. For
+    example if it was ingested by mistake or fails manual review.
+    Also clears the Redis cache entry so stale data is not served.
+
+    Args:
+        identifier (str): The DOI, arXiv ID, or ADS bibcode to delete.
+
+    Returns:
+        bool: True if a paper was deleted, False if no paper was found
+            with that identifier.
+    """
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM papers WHERE identifier = $1",
+            identifier,
+        )
+
+    # result is a string like 'DELETE 1' or 'DELETE 0'
+    rows_deleted = int(result.split()[-1])
+    return rows_deleted > 0
+
+
 async def list_papers(
     limit: int = 20,
     offset: int = 0,
@@ -273,6 +300,7 @@ async def search_papers(
 
     return [_row_to_paper(row) for row in rows], total
 
+
 async def filter_papers_by_keywords(
     keywords: list[str],
     match_all: bool = False,
@@ -306,9 +334,7 @@ async def filter_papers_by_keywords(
     conditions = []
     params: list = []
     for i, kw in enumerate(keywords, start=1):
-        conditions.append(
-            f"(title ILIKE ${i} OR abstract ILIKE ${i})"
-        )
+        conditions.append(f"(title ILIKE ${i} OR abstract ILIKE ${i})")
         params.append(f"%{kw}%")
 
     joiner = " AND " if match_all else " OR "

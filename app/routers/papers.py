@@ -20,6 +20,7 @@ from app.services.database import (
     list_papers,
     save_paper,
     search_papers,
+    delete_paper,
 )
 from app.services.fetcher import fetch_by_ads, fetch_by_arxiv, fetch_by_doi
 from app.services.ingestion import (
@@ -319,6 +320,48 @@ async def filter_by_keywords(
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+@router.delete(
+    "/{identifier}",
+    summary="Delete a paper from the collection",
+)
+async def remove_paper(identifier: str):
+    """Delete a single paper by its identifier.
+
+    Removes the paper from Postgres and invalidates its Redis cache
+    entry so stale data is not served after deletion. Returns 404 if
+    no paper with that identifier exists.
+
+    This endpoint is useful for removing papers that were ingested by
+    mistake, failed manual domain review, or are otherwise unwanted.
+
+    Args:
+        identifier (str): The DOI, arXiv ID, or ADS bibcode to delete.
+            e.g. '2501.19169', '10.1007/s11207-021-01842-0'
+
+    Returns:
+        dict: Confirmation message and the deleted identifier.
+
+    Raises:
+        HTTPException 404: If no paper with that identifier exists.
+    """
+    from app.cache import delete_cached_paper
+
+    deleted = await delete_paper(identifier)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No paper found with identifier '{identifier}'",
+        )
+
+    await delete_cached_paper(identifier)
+
+    return {
+        "deleted": True,
+        "identifier": identifier,
     }
 
 
