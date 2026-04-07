@@ -12,15 +12,17 @@ from app.models.paper import (
     IdentifierType,
     PaperLookupRequest,
     PaperMetadata,
+    PaperPatchRequest,
 )
 from app.services.database import (
+    delete_paper,
     filter_papers_by_keywords,
     get_paper,
     get_stats,
     list_papers,
+    patch_paper,
     save_paper,
     search_papers,
-    delete_paper,
 )
 from app.services.fetcher import fetch_by_ads, fetch_by_arxiv, fetch_by_doi
 from app.services.ingestion import (
@@ -363,6 +365,63 @@ async def remove_paper(identifier: str):
         "deleted": True,
         "identifier": identifier,
     }
+
+
+@router.patch(
+    "/{identifier}",
+    response_model=PaperMetadata,
+    summary="Partially update a stored paper",
+)
+async def update_paper(identifier: str, request: PaperPatchRequest):
+    """Partially update fields on a stored paper.
+
+    Only the fields provided in the request body are updated. All
+    other fields are left unchanged. Useful for manually correcting
+    a title, filling in a missing abstract, fixing a URL, or adding
+    a DOI that was missing at ingestion time.
+
+    After updating, the Redis cache entry is refreshed so subsequent
+    lookups return the corrected data immediately.
+
+    Args:
+        identifier (str): The DOI, arXiv ID, or ADS bibcode to update.
+        request (PaperPatchRequest): Fields to update. Only non-null
+            fields in the request body will be applied.
+
+    Returns:
+        PaperMetadata: The full updated paper metadata.
+
+    Raises:
+        HTTPException 404: If no paper with that identifier exists.
+        HTTPException 400: If no fields are provided to update.
+    """
+    import json
+
+    # Extract only the fields that were explicitly provided
+    updates = {
+        field: value
+        for field, value in request.model_dump().items()
+        if value is not None
+    }
+
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one field must be provided to update.",
+        )
+
+    updated = await patch_paper(identifier, updates)
+
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No paper found with identifier '{identifier}'",
+        )
+
+    # Refresh Redis cache with the updated data
+    await cache_paper(identifier, json.dumps(updated.model_dump(), default=str))
+
+    return updated
 
 
 @router.get(

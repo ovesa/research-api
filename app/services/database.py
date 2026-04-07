@@ -104,6 +104,51 @@ async def delete_paper(identifier: str) -> bool:
     return rows_deleted > 0
 
 
+async def patch_paper(identifier: str, updates: dict) -> Optional[PaperMetadata]:
+    """Partially update a stored paper's fields.
+
+    Builds a dynamic UPDATE query from only the fields provided.
+    Fields not included in updates are left unchanged. Returns the
+    updated paper so the caller can cache the fresh version.
+
+    Args:
+        identifier (str): The identifier of the paper to update.
+        updates (dict): A dict of field names to new values.
+            Only non-None fields from the patch request should be passed.
+
+    Returns:
+        PaperMetadata: The updated paper if found, None if not found.
+    """
+    if not updates:
+        return await get_paper(identifier)
+
+    pool = await get_pool()
+
+    # Build SET clause dynamically from provided fields only
+    set_clauses = []
+    params = []
+    param_index = 1
+
+    for field, value in updates.items():
+        set_clauses.append(f"{field} = ${param_index}")
+        params.append(value)
+        param_index += 1
+
+    params.append(identifier)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            UPDATE papers
+            SET {", ".join(set_clauses)}
+            WHERE identifier = ${param_index}
+            """,
+            *params,
+        )
+
+    return await get_paper(identifier)
+
+
 async def list_papers(
     limit: int = 20,
     offset: int = 0,
