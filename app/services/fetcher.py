@@ -36,7 +36,7 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
             or abstract, False otherwise.
     """
     text = f"{title} {abstract or ''}".lower()
-    return any(keyword in text for keyword in HELIOPHYSICS_KEYWORDS)
+    return any(keyword.lower() in text for keyword in HELIOPHYSICS_KEYWORDS)
 
 
 def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
