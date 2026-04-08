@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -154,13 +154,13 @@ class PaperLookupRequest(BaseModel):
     """Request body for looking up a single heliophysics paper.
 
     Attributes:
-        identifier (str): The DOI or arXiv ID to look up.
+        identifier (str): The DOI, arXiv ID, or ADS bibcode to look up.
         identifier_type (IdentifierType): Explicitly declare which type it is.
-            Required because some strings are ambiguous without context.
 
     Example:
         {"identifier": "10.1038/nature12373", "identifier_type": "doi"}
         {"identifier": "2103.08049", "identifier_type": "arxiv"}
+        {"identifier": "2025ApJ...123..456V", "identifier_type": "ads"}
     """
 
     identifier: str
@@ -183,6 +183,38 @@ class PaperLookupRequest(BaseModel):
         if not v.strip():
             raise ValueError("identifier cannot be empty")
         return v.strip()
+
+    @model_validator(mode="after")
+    def validate_identifier_format(self) -> "PaperLookupRequest":
+        """Validate identifier format matches its declared type.
+
+        Checks the identifier against a regex pattern for its type.
+        Rejects obviously malformed identifiers before hitting any
+        external API, saving latency and avoiding unnecessary calls.
+
+        Returns:
+            PaperLookupRequest: The validated request.
+
+        Raises:
+            ValueError: If the identifier does not match the expected
+                format for its declared type.
+        """
+        import re
+
+        patterns = {
+            IdentifierType.doi: r"^10\.\d{4,9}/\S+$",
+            IdentifierType.arxiv: r"^\d{4}\.\d{4,6}(v\d+)?$",
+            IdentifierType.ads: r"^[12]\d{3}\w[\w&+.]{13}\w$",
+        }
+
+        pattern = patterns.get(self.identifier_type)
+        if pattern and not re.match(pattern, self.identifier.strip()):
+            raise ValueError(
+                f"'{self.identifier}' does not look like a valid "
+                f"{self.identifier_type.value} identifier."
+            )
+
+        return self
 
 
 class BulkLookupRequest(BaseModel):

@@ -154,6 +154,8 @@ async def list_papers(
     offset: int = 0,
     identifier_type: Optional[str] = None,
     source: Optional[str] = None,
+    sort_by: str = "fetched_at",
+    sort_order: str = "desc",
 ) -> tuple[list[PaperMetadata], int]:
     """List stored papers with optional filtering and pagination.
 
@@ -191,7 +193,7 @@ async def list_papers(
             f"""
             SELECT * FROM papers
             {where_clause}
-            ORDER BY fetched_at DESC
+            ORDER BY {sort_by} {sort_order.upper()}
             LIMIT ${param_index} OFFSET ${param_index + 1}
             """,
             *params,
