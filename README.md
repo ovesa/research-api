@@ -22,7 +22,7 @@ This was also my first real backend project. I used it to learn FastAPI, async P
 
 ## Architecture
 
-```
+`````text
 Client
   |
   v
@@ -37,12 +37,12 @@ FastAPI (async) -- rate limited, structured logging, request tracing
         |-- arXiv             (preprint metadata)
         |-- NASA ADS          (published paper metadata + citation counts)
         └-- Semantic Scholar  (citation count fallback)
-```
+`````
 
 Every request checks Redis first, then Postgres, then hits external APIs only if needed:
 
 | Layer | Latency |
-|---|---|
+| --- | --- |
 | Redis cache hit | ~2ms |
 | Postgres hit | ~14ms |
 | External API fetch | ~400ms |
@@ -54,7 +54,7 @@ That is roughly a 200x speedup from caching on repeated lookups, which shows up 
 ## Tech stack
 
 | | |
-|---|---|
+| --- | --- |
 | API | FastAPI |
 | Database | PostgreSQL + asyncpg |
 | Cache | Redis |
@@ -103,7 +103,7 @@ You will need an API key for NASA ADS, which you can get for free at <https://ui
 ## API endpoints
 
 | Method | Endpoint | Description |
-|---|---|---|
+| --- | --- | --- |
 | `POST` | `/papers/lookup` | Look up a single paper by DOI, arXiv ID, or ADS bibcode |
 | `POST` | `/papers/bulk` | Look up up to 50 papers concurrently |
 | `GET` | `/papers/` | List all stored papers with pagination and sorting |
