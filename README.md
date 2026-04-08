@@ -1,55 +1,60 @@
 # Heliophysics Paper API
 
-I'm a postdoc at Stanford University working in solar physics, and I built this project as part of my transition into industry. The problem this solves is one I ran into constantly during my research: there's no clean, programmatic way to search and retrieve heliophysics papers across arXiv and journal databases. While arXiv has subject fields, solar physics or heliophysics gets wrapped into stellar astrophysics. One has to manually dig through the listings. So, I created this API to fix that.
+I am a postdoc at Stanford working in solar physics, and I built this project while transitioning into industry. The problem it solves is one I ran into constantly during my research: there is no clean programmatic way to search and retrieve heliophysics papers across arXiv and journal databases. Solar physics gets buried inside stellar astrophysics categories on arXiv, and you end up manually scrolling through listings that have nothing to do with what you are looking for. So I built this API to fix that for myself, and then kept adding to it until it became something I would actually want to show in an interview.
 
-This is also my first serious backend project, built to learn the following tools: FastAPI, async Python, Redis, PostgreSQL, and production patterns like structured logging and multi-layer caching. I used Claude AI assistance during development the same way I would use Stack Overflow or documentation: as a tool to learn faster not to skip understanding things.
+This was also my first real backend project. I used it to learn FastAPI, async Python, Redis, PostgreSQL, and production patterns like structured logging and multi-layer caching.
 
 ---
 
-## **What it does**
+## What it does
 
-- Look up any heliophysics/solar physics paper by DOI or arXiv ID and get clean, normalized metadata
-- Automatically validates that papers are actually heliophysics-related and rejects everything else
-- Full text search across a curated collection using Postgres native search
-- Bulk ingests the latest papers from heliophysics arXiv categories automatically
+- Look up any heliophysics paper by DOI, arXiv ID, or NASA ADS bibcode and get normalized metadata back
+- Validate that papers are actually heliophysics-related and reject everything else with a clear explanation
+- Full text search across a curated collection using Postgres native search with relevance ranking
+- Filter by specific keywords with exact substring matching and optional `match_all` mode
+- Bulk ingest papers from arXiv, NASA ADS, or a specific date range using CLI tools
+- Manually correct records with PATCH or remove them with DELETE
+- Paginated and sortable list endpoint with navigation metadata baked into every response
+- Rate limited lookup endpoint to protect upstream APIs from abuse
 - Three-layer caching so repeated lookups are fast without hammering external APIs
 
 ---
 
-## **Architecture**
+## Architecture
 
 ```
 Client
-  │
-  ▼
-FastAPI (async)
-  │
-  ├── Redis Cache (~2ms for cached papers)
-  │
-  ├── PostgreSQL (permanent storage + full text search)
-  │
-  └── External APIs (fired concurrently via asyncio.gather)
-        ├── CrossRef          (DOI metadata)
-        ├── arXiv             (preprint metadata)
-        └── Semantic Scholar  (citation counts)
+  |
+  v
+FastAPI (async) -- rate limited, structured logging, request tracing
+  |
+  |-- Redis Cache (~2ms for cached papers)
+  |
+  |-- PostgreSQL (permanent storage + full text search + GIN index)
+  |
+  └-- External APIs (fired concurrently via asyncio.gather)
+        |-- CrossRef          (DOI metadata)
+        |-- arXiv             (preprint metadata)
+        |-- NASA ADS          (published paper metadata + citation counts)
+        └-- Semantic Scholar  (citation count fallback)
 ```
 
-Every request checks Redis first, then Postgres, then hits the external APIs only if needed. In practice this means:
+Every request checks Redis first, then Postgres, then hits external APIs only if needed:
 
 | Layer | Latency |
-| --- | --- |
+|---|---|
 | Redis cache hit | ~2ms |
 | Postgres hit | ~14ms |
 | External API fetch | ~400ms |
 
-That's a ~184x speedup from caching on repeated lookups, which is visible in the request logs.
+That is roughly a 200x speedup from caching on repeated lookups, which shows up clearly in the request logs.
 
 ---
 
-## **Tech Stack**
+## Tech stack
 
 | | |
-| --- | --- |
+|---|---|
 | API | FastAPI |
 | Database | PostgreSQL + asyncpg |
 | Cache | Redis |
@@ -57,11 +62,13 @@ That's a ~184x speedup from caching on repeated lookups, which is visible in the
 | Validation | Pydantic v2 |
 | Migrations | Alembic |
 | Logging | structlog |
+| Rate limiting | slowapi |
+| Testing | pytest + pytest-asyncio |
 | Infrastructure | Docker + docker-compose |
 
 ---
 
-## **Quick Start**
+## Quick start
 
 You need Docker and Python 3.12+.
 
@@ -77,6 +84,9 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
+# copy and fill in your environment variables
+cp .env.example .env
+
 # run migrations
 alembic upgrade head
 
@@ -84,11 +94,36 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Go to `http://localhost:8000/docs`; everything is interactive there.
+Go to `http://localhost:8000/docs` and everything is interactive there.
+
+You will need an API key for NASA ADS, which you can get for free at <https://ui.adsabs.harvard.edu/user/settings/token>
 
 ---
 
-## **Usage**
+## API endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/papers/lookup` | Look up a single paper by DOI, arXiv ID, or ADS bibcode |
+| `POST` | `/papers/bulk` | Look up up to 50 papers concurrently |
+| `GET` | `/papers/` | List all stored papers with pagination and sorting |
+| `GET` | `/papers/search` | Full text search with relevance ranking |
+| `GET` | `/papers/filter` | Filter by explicit keywords with match_all support |
+| `PATCH` | `/papers/{identifier}` | Partially update a stored paper |
+| `DELETE` | `/papers/{identifier}` | Remove a paper from the collection |
+| `POST` | `/papers/ingest/arxiv` | Ingest latest papers from heliophysics arXiv categories |
+| `POST` | `/papers/ingest/ads` | Ingest papers from NASA ADS by date range and keywords |
+| `POST` | `/papers/ingest/daterange` | Ingest arXiv papers submitted in a specific date range |
+| `POST` | `/papers/ingest/ids` | Ingest a specific list of arXiv IDs |
+| `GET` | `/papers/stats` | Collection statistics |
+| `GET` | `/papers/metrics` | Cache hit/miss rates |
+| `GET` | `/papers/health` | Health check |
+| `GET` | `/health/live` | Liveness check |
+| `GET` | `/health/ready` | Readiness check (verifies Postgres and Redis) |
+
+---
+
+## Usage
 
 ### Look up a paper
 
@@ -102,41 +137,107 @@ curl -X POST http://localhost:8000/papers/lookup \
 curl -X POST http://localhost:8000/papers/lookup \
   -H "Content-Type: application/json" \
   -d '{"identifier": "2509.19847", "identifier_type": "arxiv"}'
+
+# by ADS bibcode
+curl -X POST http://localhost:8000/papers/lookup \
+  -H "Content-Type: application/json" \
+  -d '{"identifier": "2026ApJ...997L..22H", "identifier_type": "ads"}'
 ```
+
+Identifiers are validated against regex patterns before any external API is called. A malformed DOI or arXiv ID gets rejected immediately with a clear 422 error rather than a slow failed fetch.
 
 ### Search
 
 ```bash
 curl "http://localhost:8000/papers/search?q=solar+wind+magnetic+field"
-curl "http://localhost:8000/papers/search?q=magnetohydrodynamic"
-curl "http://localhost:8000/papers/search?q=coronal+mass+ejection"
+curl "http://localhost:8000/papers/search?q=magnetohydrodynamic&limit=5&offset=0"
 ```
 
-Search uses Postgres `tsvector` with `ts_rank` scoring, where title matches rank higher than abstract matches, and stemming means `magnetohydrodynamic` matches `magnetohydrodynamics` automatically.
+Uses Postgres `tsvector` with `ts_rank` scoring. Title matches rank higher than abstract matches. Stemming is handled automatically, so `magnetohydrodynamic` matches `magnetohydrodynamics`. Every response includes pagination metadata: `total_pages`, `has_next`, `has_prev`, and `next_offset`.
 
-### Ingest latest papers
+### Filter by keywords
 
 ```bash
-curl -X POST "http://localhost:8000/papers/ingest/arxiv?max_per_category=25"
+# any keyword matches (default)
+curl "http://localhost:8000/papers/filter?keywords=inertial+modes,rossby+waves"
+
+# all keywords must match
+curl "http://localhost:8000/papers/filter?keywords=helioseismology,solar&match_all=true"
 ```
 
-Pulls the latest papers from `astro-ph.SR`, `physics.space-ph`, and `astro-ph.EP`, validates each one, and stores the ones that pass.
+Unlike search, filtering uses exact case-insensitive substring matching with no stemming or relevance ranking. Useful when you want papers that specifically contain a term rather than anything semantically related to it.
 
-### Collection stats
+### List and sort
 
 ```bash
-curl http://localhost:8000/papers/stats
+# sort by citation count
+curl "http://localhost:8000/papers/?sort_by=citation_count&sort_order=desc&limit=10"
+
+# sort alphabetically
+curl "http://localhost:8000/papers/?sort_by=title&sort_order=asc"
+```
+
+Allowed sort fields: `fetched_at`, `published_date`, `citation_count`, `title`.
+
+### Ingest papers
+
+```bash
+# interactive CLI (prompts for everything)
+python ingest.py
+
+# non-interactive
+python ingest.py --source ads --start 2025-01 --end 2026-04
+python ingest.py --source arxiv --max 50
+python ingest.py --source ads --keywords "inertial modes,rossby waves"
+```
+
+### Backfill missing data
+
+```bash
+# dry run first to see what would be fixed
+python backfill.py --dry-run --target all
+
+# fix missing URLs
+python backfill.py --target urls
+
+# refresh stale citation counts
+# tries Semantic Scholar first, falls back to NASA ADS
+python backfill.py --target citations
+```
+
+### Deduplicate
+
+```bash
+# preview what would be merged
+python deduplicate.py --dry-run
+
+# auto-merge records sharing the same DOI, keeping the richer one
+python deduplicate.py --merge
+```
+
+### Patch and delete
+
+```bash
+# fix a missing journal
+curl -X PATCH "http://localhost:8000/papers/2512.16028" \
+  -H "Content-Type: application/json" \
+  -d '{"journal": "The Astrophysical Journal"}'
+
+# remove a paper
+curl -X DELETE "http://localhost:8000/papers/2509.19847"
 ```
 
 ---
 
-## **Heliophysics Validation**
+## Heliophysics validation
 
-This was the part I actually found interesting to build because I knew what the data should look like. The API rejects papers that aren't heliophysics-related before storing them.
+This was the part I found most interesting to build because I actually know what the data should look like from my research background.
 
-For **arXiv papers**: the primary category must be `astro-ph.SR`. Secondary tags alone don't count because a plasma physics paper that happens to also be tagged `astro-ph.SR` gets rejected.
+For **arXiv papers**: the primary category must be `astro-ph.SR` or `physics.space-ph`. A secondary tag alone does not qualify. A plasma physics paper that also carries a heliophysics tag gets rejected.
 
-For **DOI papers**: the journal must be on a curated heliophysics whitelist, or heliophysics keywords must appear in the title or abstract. This handles cases where heliophysics papers get published in broad journals like Nature or ApJ.
+For **DOI and ADS papers**: the journal must be on a curated heliophysics whitelist, or heliophysics keywords must appear in the title or abstract. This handles papers published in broad journals like Nature or ApJ.
+
+There is also a secondary filter that catches papers slipping through keyword matching because they mention plasma or magnetic fields but are actually about neutron stars, black holes, exoplanets, or stellar evolution. Those get rejected even if they pass the primary checks.
 
 Rejected papers come back with a clear explanation:
 
@@ -150,22 +251,36 @@ Rejected papers come back with a clear explanation:
 
 ---
 
-## **Design Decisions**
+## Testing
 
-A few things I made deliberate choices about:
+```bash
+pytest tests/ -v
+```
 
-**asyncpg over SQLAlchemy**: I wanted to write actual SQL rather than work through an ORM abstraction. It also made using Postgres full text search features (`tsvector`, `ts_rank`, GIN indexes) more straightforward.
+52 tests covering unit tests for all domain validation functions and integration tests for every API endpoint. External APIs, the database, and Redis are all mocked so tests run in under a second with no external dependencies.
 
-**Postgres full text search over Elasticsearch**: Elasticsearch would add real operational complexity for a project at this scale. Postgres handles it well enough and keeps the stack simpler.
-
-**Sequential category ingestion**: arXiv asks for a maximum of 4 requests per second. Firing all three category searches concurrently risks triggering rate limiting, so I search them sequentially with a pause in between.
-
-**`identifier` as primary key**: DOIs and arXiv IDs are already globally unique. Using them directly as the primary key avoids a separate lookup and makes idempotent inserts with `ON CONFLICT DO NOTHING` trivial.
-
-**Caching rejections in Redis but not Postgres**: if someone submits an invalid identifier repeatedly, I don't want to call CrossRef every time. Caching the rejection prevents that. But I don't store rejections in Postgres because that's meant to be a clean, curated collection.
+The test suite caught two real bugs during development: a missing keyword (`magnetosphere`) in the validation set, and a case-sensitivity bug where uppercase acronyms like `SDO` and `MHD` in the keyword list were never matching lowercased input text.
 
 ---
 
-## **Acknowledgements**
+## Design decisions
 
-Thank you to arXiv for use of its open access interoperability.
+**asyncpg over SQLAlchemy**: I wanted to write actual SQL rather than work through an ORM abstraction. It also made using Postgres full text search features (`tsvector`, `ts_rank`, GIN indexes) more straightforward to reason about directly.
+
+**Postgres full text search over Elasticsearch**: Elasticsearch adds real operational complexity for a project at this scale. Postgres handles it well and keeps the stack simple.
+
+**NASA ADS as primary source for published papers**: ADS returns richer metadata than CrossRef for astronomy papers. Abstracts are almost always present, author lists are complete, and citation counts come back directly without needing a separate Semantic Scholar call.
+
+**Sequential arXiv category ingestion**: arXiv asks for a maximum of 4 requests per second. Firing all category searches concurrently would risk triggering rate limiting, so they run sequentially with a pause between each one.
+
+**`identifier` as primary key**: DOIs and arXiv IDs are already globally unique. Using them directly as the primary key avoids a separate lookup step and makes idempotent inserts with `ON CONFLICT DO NOTHING` trivial.
+
+**Caching rejections in Redis but not Postgres**: if someone submits an invalid identifier repeatedly, the rejection is cached so the external API is not called again. But rejections are not stored in Postgres because that table is meant to be a curated collection of validated papers only.
+
+**ADS fallback for citation counts**: Semantic Scholar does not index recent preprints reliably. When it returns nothing, the backfill tool falls back to NASA ADS, which tends to have citation data even for papers a few months old.
+
+---
+
+## Acknowledgements
+
+Thank you to arXiv for use of its open access interperability.
