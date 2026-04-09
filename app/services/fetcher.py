@@ -38,6 +38,18 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
     text = f"{title} {abstract or ''}".lower()
     return any(keyword.lower() in text for keyword in HELIOPHYSICS_KEYWORDS)
 
+solar_specific_phrases = {
+    "solar rossby waves",
+    "solar inertial modes",
+    "rossby waves in the sun",
+    "inertial modes in the sun", "solar rossby modes"
+}
+
+def _has_solar_specific_phrases(title: str, abstract: Optional[str]) -> bool:
+    text = f"{title} {abstract or ''}".lower()
+    return any(phrase in text for phrase in solar_specific_phrases)
+
+
 
 def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
     """Check if a paper is heliophysics-related by its journal name.
@@ -520,7 +532,6 @@ def _normalize_ads(
         url=ads_url,
     )
 
-
 async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by DOI.
 
@@ -567,7 +578,7 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     citation_count = semantic_data.get("citation_count")
 
     if not _is_heliophysics_by_journal(journal):
-        if not _is_heliophysics_by_keywords(title or "", abstract):
+        if not _has_solar_specific_phrases(title or "", abstract):
             log.warning(
                 "heliophysics_validation_failed",
                 journal=journal,
@@ -576,16 +587,14 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
             return DomainValidationError(
                 identifier=doi,
                 reason=(
-                    f"Paper does not appear to be heliophysics-related. "
-                    f"Journal '{journal}' is not on the heliophysics whitelist "
-                    f"and no heliophysics keywords were found in the title or abstract."
+                    "Paper is not in a target journal and does not contain "
+                    "solar-specific phrases in title or abstract."
                 ),
                 title=title,
             )
 
     log.info("fetch_complete", duration_ms=duration_ms, source="crossref")
     return _normalize_crossref(doi, crossref_data, citation_count)
-
 
 async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by arXiv ID.
