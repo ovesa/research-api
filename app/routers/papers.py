@@ -634,7 +634,7 @@ async def ingest_from_ads_endpoint(
     end_date: str = Query(..., description="End date in YYYY-MM format e.g. 2025-03"),
     max_results: int = Query(default=100),
     keywords: str = Query(
-        default=("inertial modes OR rossby waves OR helioseismology"),
+        default=('abs:"inertial modes" OR abs:"rossby waves"'),
     ),
 ):
     """Ingest heliophysics papers from NASA ADS within a date range.

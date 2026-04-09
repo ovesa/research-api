@@ -146,7 +146,7 @@ def run_interactive() -> None:
     """Walk the user through ingestion choices interactively.
 
     Prompts for source, date range, max results, and keywords.
-    All prompts show a default in brackets. Pressing Enter to 
+    All prompts show a default in brackets. Pressing Enter to
     accept it.
     """
     print("\n══ Heliophysics Paper Ingester ══════════════════════")
@@ -174,10 +174,12 @@ def run_interactive() -> None:
         use_default = prompt("Use default keywords? (yes/no)", "yes").lower()
 
         if use_default.startswith("y"):
-            keywords = " OR ".join(DEFAULT_KEYWORDS)
+            keywords = " OR ".join(f'abs:"{k}"' for k in DEFAULT_KEYWORDS)
         else:
             raw = input("Enter keywords separated by commas: ").strip()
-            keywords = " OR ".join(k.strip() for k in raw.split(",") if k.strip())
+            keywords = " OR ".join(
+                f'abs:"{k.strip()}"' for k in raw.split(",") if k.strip()
+            )
 
         ingest_ads(start, end, keywords, max_r)
 
@@ -242,10 +244,10 @@ def run_cli(args: argparse.Namespace) -> None:
         end = args.end or today_ads()
         if args.keywords:
             keywords = " OR ".join(
-                k.strip() for k in args.keywords.split(",") if k.strip()
+                f'abs:"{k.strip()}"' for k in args.keywords.split(",") if k.strip()
             )
         else:
-            keywords = " OR ".join(DEFAULT_KEYWORDS)
+            keywords = " OR ".join(f'abs:"{k}"' for k in DEFAULT_KEYWORDS)
         ingest_ads(start, end, keywords, args.max)
 
 
