@@ -20,6 +20,8 @@ HELIOPHYSICS_JOURNALS = {
     "nature",
     "nature astronomy",
     "monthly notices of the royal astronomical society",
+    "annual review of astronomy and astrophysics",
+    "science",
 }
 
 # Keywords that must appear in title or abstract for DOI lookups
