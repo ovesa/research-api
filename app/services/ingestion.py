@@ -252,14 +252,9 @@ async def _search_ads(
 
     async with _make_ingestion_client() as client:
         full_query = (
-                    f"({query}) AND "
-                    f'pub:("Solar Physics" OR "The Astrophysical Journal" OR '
-                    f'"The Astrophysical Journal Letters" OR "The Astrophysical Journal Supplement Series" OR '
-                    f'"Astronomy and Astrophysics" OR "Space Weather" OR '
-                    f'"Nature Astronomy" OR "Nature" OR '
-                    f'"Monthly Notices of the Royal Astronomical Society" OR '
-                    f'"Annual Review of Astronomy and Astrophysics" OR "Science") AND '
-                    f"pubdate:[{start_date} TO {end_date}]"
+            f"(abs:\"inertial modes\" OR abs:\"inertial waves\" OR abs:\"rossby modes\" OR abs:\"rossby waves\") AND "
+            f"(abs:\"solar\" OR abs:\"the sun\" OR title:\"sun\") AND "
+            f"pubdate:[{start_date} TO {end_date}]"
         )
 
         try:

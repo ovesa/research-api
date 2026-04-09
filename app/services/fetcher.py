@@ -38,18 +38,28 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
     text = f"{title} {abstract or ''}".lower()
     return any(keyword.lower() in text for keyword in HELIOPHYSICS_KEYWORDS)
 
-solar_specific_phrases = {
-    "solar rossby waves",
-    "solar inertial modes",
-    "rossby waves in the sun",
-    "inertial modes in the sun", "solar rossby modes"
+target_phrases = {
+    "inertial modes",
+    "inertial waves",
+    "rossby modes",
+    "rossby waves",
 }
 
-def _has_solar_specific_phrases(title: str, abstract: Optional[str]) -> bool:
+solar_indicators = {
+    "solar",
+    "the sun",
+    "sun:",
+    "on the sun",
+    "in the sun",
+}
+
+def _has_target_phrase(title: str, abstract: Optional[str]) -> bool:
     text = f"{title} {abstract or ''}".lower()
-    return any(phrase in text for phrase in solar_specific_phrases)
+    return any(phrase in text for phrase in target_phrases)
 
-
+def _has_solar_indicator(title: str, abstract: Optional[str]) -> bool:
+    text = f"{title} {abstract or ''}".lower()
+    return any(indicator in text for indicator in solar_indicators)
 
 def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
     """Check if a paper is heliophysics-related by its journal name.
@@ -536,14 +546,14 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by DOI.
 
     Hits CrossRef and Semantic Scholar concurrently using asyncio.gather.
-    Validates the result against heliophysics journal and keyword lists
-    before returning. Rejects papers that do not match.
+    Validates that the paper contains target phrases (inertial modes/waves,
+    rossby modes/waves) and solar indicators before returning.
 
     Args:
         doi (str): The DOI to look up. e.g. 10.1038/nature12373
 
     Returns:
-        PaperMetadata: Normalized metadata if paper is heliophysics-related.
+        PaperMetadata: Normalized metadata if paper passes validation.
         DomainValidationError: Rejection details if paper does not match.
     """
     import time
@@ -572,29 +582,29 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     titles = crossref_data.get("title", [])
     title = titles[0] if titles else None
 
-    container = crossref_data.get("container-title", [])
-    journal = container[0] if container else None
     abstract = crossref_data.get("abstract")
     citation_count = semantic_data.get("citation_count")
 
-    if not _is_heliophysics_by_journal(journal):
-        if not _has_solar_specific_phrases(title or "", abstract):
-            log.warning(
-                "heliophysics_validation_failed",
-                journal=journal,
-                duration_ms=duration_ms,
-            )
-            return DomainValidationError(
-                identifier=doi,
-                reason=(
-                    "Paper is not in a target journal and does not contain "
-                    "solar-specific phrases in title or abstract."
-                ),
-                title=title,
-            )
+    if not _has_target_phrase(title or "", abstract):
+        log.warning("target_phrase_missing", duration_ms=duration_ms)
+        return DomainValidationError(
+            identifier=doi,
+            reason="Paper does not contain target phrases (inertial modes/waves, rossby modes/waves).",
+            title=title,
+        )
+
+    if not _has_solar_indicator(title or "", abstract):
+        log.warning("solar_indicator_missing", duration_ms=duration_ms)
+        return DomainValidationError(
+            identifier=doi,
+            reason="Paper does not appear to be solar/heliophysics-related.",
+            title=title,
+        )
 
     log.info("fetch_complete", duration_ms=duration_ms, source="crossref")
     return _normalize_crossref(doi, crossref_data, citation_count)
+
+
 
 async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by arXiv ID.
@@ -663,20 +673,19 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     log.info("fetch_complete", duration_ms=duration_ms, source="arxiv")
     return _normalize_arxiv(clean_id, arxiv_data, citation_count)
 
-
 async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by ADS bibcode.
 
-    Hits the NASA ADS API and validates the result against heliophysics
-    journal and keyword lists. ADS is the authoritative database for
-    astronomy literature and returns richer metadata than CrossRef.
+    Hits the NASA ADS API and validates that the paper contains target
+    phrases (inertial modes/waves, rossby modes/waves) and solar indicators
+    before returning.
 
     Args:
         bibcode (str): The ADS bibcode to look up.
             e.g. '2025ApJ...123..456V'
 
     Returns:
-        PaperMetadata: Normalized metadata if paper is heliophysics-related.
+        PaperMetadata: Normalized metadata if paper passes validation.
         DomainValidationError: Rejection details if paper does not match.
     """
     import time
@@ -702,36 +711,20 @@ async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
     titles = ads_data.get("title", [])
     title = titles[0] if titles else ""
     abstract = ads_data.get("abstract")
-    journal = ads_data.get("pub")
 
-    # Validate heliophysics relevance
-    if not _is_heliophysics_by_journal(journal):
-        if not _is_heliophysics_by_keywords(title, abstract):
-            log.warning(
-                "heliophysics_validation_failed",
-                journal=journal,
-                duration_ms=duration_ms,
-            )
-            return DomainValidationError(
-                identifier=bibcode,
-                reason=(
-                    f"Paper does not appear to be heliophysics-related. "
-                    f"Journal '{journal}' is not on the heliophysics whitelist "
-                    f"and no heliophysics keywords were found in the title or abstract."
-                ),
-                title=title,
-            )
-
-    if _is_stellar_astrophysics(title, abstract):
-        log.warning(
-            "stellar_astrophysics_rejected",
-            identifier=bibcode,
-            title=title,
-            duration_ms=duration_ms,
-        )
+    if not _has_target_phrase(title, abstract):
+        log.warning("target_phrase_missing", duration_ms=duration_ms)
         return DomainValidationError(
             identifier=bibcode,
-            reason="Paper appears to be stellar astrophysics rather than heliophysics.",
+            reason="Paper does not contain target phrases (inertial modes/waves, rossby modes/waves).",
+            title=title,
+        )
+
+    if not _has_solar_indicator(title, abstract):
+        log.warning("solar_indicator_missing", duration_ms=duration_ms)
+        return DomainValidationError(
+            identifier=bibcode,
+            reason="Paper does not appear to be solar/heliophysics-related.",
             title=title,
         )
 
