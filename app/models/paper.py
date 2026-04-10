@@ -90,6 +90,9 @@ HELIOPHYSICS_KEYWORDS = {
 EXCLUDED_BIBCODE_PATTERNS = {
     "confE",  # conference oral abstract
     "confP",  # conference poster abstract
+    "DPS",  # Division for Planetary Sciences abstracts
+    "AAS",  # American Astronomical Society meeting abstracts
+    "AGUFM",  # AGU Fall Meeting abstracts
 }
 
 
@@ -110,7 +113,6 @@ class IdentifierType(str, Enum):
     doi = "doi"
     arxiv = "arxiv"
     ads = "ads"
-
 
 
 class Author(BaseModel):
@@ -137,6 +139,7 @@ class Author(BaseModel):
     def model_dump(self, **kwargs):
         kwargs.setdefault("exclude_none", True)
         return super().model_dump(**kwargs)
+
 
 class PaperMetadata(BaseModel):
     """Normalized metadata structure returned for every heliophysics paper.
