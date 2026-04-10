@@ -113,7 +113,7 @@ def ingest_daterange(start: str, end: str, max_per_category: int) -> None:
     print_result(r.json(), "arXiv date range")
 
 
-def ingest_ads(start: str, end: str, keywords: str, max_results: int) -> None:
+def ingest_ads(start: str, end: str, keywords: str, max_results: int, mode: str = "keyword") -> None:
     """Fetch heliophysics papers from NASA ADS within a date range.
 
     Hits POST /papers/ingest/ads. ADS is preferred over arXiv for
@@ -125,9 +125,15 @@ def ingest_ads(start: str, end: str, keywords: str, max_results: int) -> None:
         end (str): End date in YYYY-MM format e.g. '2026-04'.
         keywords (str): OR-joined keyword string sent to ADS.
         max_results (int): Maximum total papers to retrieve.
+        mode (str): Ingestion mode. Either "keyword" or "broad".
     """
-    print(f"\nFetching ADS papers from {start} to {end}...")
-    print(f"Keywords: {keywords}\n")
+
+    if mode == "broad":
+        print(f"\nFetching ALL solar physics papers from ADS journals ({start} to {end})...")
+        print("Mode: broad (no keyword filter — sweeping ApJ, A&A, SoPh, JGRA, etc.)\n")
+    else:
+        print(f"\nFetching ADS papers from {start} to {end}...")
+        print(f"Keywords: {keywords}\n")
     with httpx.Client(timeout=300) as client:
         r = client.post(
             f"{BASE_URL}/ingest/ads",
@@ -136,11 +142,11 @@ def ingest_ads(start: str, end: str, keywords: str, max_results: int) -> None:
                 "end_date": end,
                 "keywords": keywords,
                 "max_results": max_results,
+                "mode": mode,
             },
         )
         r.raise_for_status()
-    print_result(r.json(), "NASA ADS")
-
+    print_result(r.json(), f"NASA ADS ({mode} mode)")
 
 def run_interactive() -> None:
     """Walk the user through ingestion choices interactively.
@@ -169,6 +175,9 @@ def run_interactive() -> None:
         start = prompt("Start date (YYYY-MM)", today_ads())
         end = prompt("End date   (YYYY-MM)", today_ads())
         max_r = int(prompt("Max results", "100"))
+        mode = prompt("Mode (keyword/broad)", "keyword").lower().strip()
+        if mode not in ("keyword", "broad"):
+            mode = "keyword"
 
         print(f"\nDefault keywords ({len(DEFAULT_KEYWORDS)} terms from keywords.py).")
         use_default = prompt("Use default keywords? (yes/no)", "yes").lower()
@@ -181,7 +190,7 @@ def run_interactive() -> None:
                 f'abs:"{k.strip()}"' for k in raw.split(",") if k.strip()
             )
 
-        ingest_ads(start, end, keywords, max_r)
+        ingest_ads(start, end, keywords, max_r, mode=mode)
 
     else:
         print(f"Unknown source '{source}'. Choose: arxiv, daterange, ads")
@@ -219,8 +228,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max results (ADS) or max per category (arXiv). Default 100.",
     )
     parser.add_argument(
-        "--keywords",
-        help="Comma-separated keywords for ADS. Defaults to keywords.py.",
+        "--mode",
+        choices=["keyword", "broad"],
+        default="keyword",
+        help="'keyword': filter by keywords (default). 'broad': sweep all core journals.",
     )
     return parser
 
@@ -248,7 +259,7 @@ def run_cli(args: argparse.Namespace) -> None:
             )
         else:
             keywords = " OR ".join(f'abs:"{k}"' for k in DEFAULT_KEYWORDS)
-        ingest_ads(start, end, keywords, args.max)
+        ingest_ads(start, end, keywords, args.max, mode=args.mode)
 
 
 if __name__ == "__main__":

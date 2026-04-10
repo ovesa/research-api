@@ -9,6 +9,24 @@ HELIOPHYSICS_ARXIV_CATEGORIES = {
     "physics.space-ph",  # Space Physics
 }
 
+# ADS bibstems for journals that publish solar/heliophysics research.
+# Used in broad-mode ingestion to sweep all papers from these journals
+# without keyword filtering. Bibstems are the ADS short journal codes.
+SOLAR_PHYSICS_JOURNAL_BIBSTEMS = {
+    "ApJ",  # The Astrophysical Journal
+    "ApJL",  # The Astrophysical Journal Letters
+    "ApJS",  # The Astrophysical Journal Supplement Series
+    "A&A",  # Astronomy and Astrophysics
+    "SoPh",  # Solar Physics
+    "SpWea",  # Space Weather
+    "MNRAS",  # Monthly Notices of the Royal Astronomical Society
+    "NatAs",  # Nature Astronomy
+    "Natur",  # Nature
+    "Sci",  # Science
+    "ARA&A",  # Annual Review of Astronomy and Astrophysics
+    "LRSP",  # Living Reviews in Solar Physics
+}
+
 # Journals that publish heliophysics research
 HELIOPHYSICS_JOURNALS = {
     "the astrophysical journal",

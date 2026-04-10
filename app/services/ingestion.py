@@ -4,7 +4,11 @@ from app.config import settings
 import httpx
 import structlog
 
-from app.models.paper import HELIOPHYSICS_ARXIV_CATEGORIES, DomainValidationError
+from app.models.paper import (
+    HELIOPHYSICS_ARXIV_CATEGORIES,
+    SOLAR_PHYSICS_JOURNAL_BIBSTEMS,
+    DomainValidationError,
+)
 from app.services.database import get_paper, save_paper
 
 logger = structlog.get_logger(__name__)
@@ -251,11 +255,7 @@ async def _search_ads(
         return []
 
     async with _make_ingestion_client() as client:
-        full_query = (
-            f"(abs:\"inertial modes\" OR abs:\"inertial waves\" OR abs:\"rossby modes\" OR abs:\"rossby waves\") AND "
-            f"(abs:\"solar\" OR abs:\"the sun\" OR title:\"sun\") AND "
-            f"pubdate:[{start_date} TO {end_date}]"
-        )
+        full_query = f"({query}) AND pubdate:[{start_date} TO {end_date}]"
 
         try:
             response = await client.get(
@@ -303,6 +303,83 @@ async def _search_ads(
         )
         return bibcodes
 
+async def _search_ads_broad(
+    start_date: str,
+    end_date: str,
+    max_results: int = 500,
+) -> list[str]:
+    """Search NASA ADS for ALL solar physics papers from core journals.
+    Broad-mode ingestion: sweeps every paper published in the configured set of
+    heliophysics journals (SOLAR_PHYSICS_JOURNAL_BIBSTEMS) within the given
+    date range, with no keyword filter.
+
+    Args:
+        start_date (str): Start date in YYYY-MM format. e.g. '2025-01'
+        end_date (str): End date in YYYY-MM format. e.g. '2025-03'
+        max_results (int): Maximum total results. Defaults to 500.
+
+    Returns:
+        list[str]: List of ADS bibcodes from the target journals.
+    """
+    if not settings.ads_api_token:
+        logger.warning("ads_token_missing")
+        return []
+
+    bibstem_clause = " OR ".join(
+        f"bibstem:{b}" for b in sorted(SOLAR_PHYSICS_JOURNAL_BIBSTEMS)
+    )
+    full_query = f"({bibstem_clause}) AND pubdate:[{start_date} TO {end_date}]"
+
+    async with _make_ingestion_client() as client:
+        try:
+            response = await client.get(
+                "https://api.adsabs.harvard.edu/v1/search/query",
+                params={
+                    "q": full_query,
+                    "fl": "bibcode",
+                    "rows": max_results,
+                    "sort": "pubdate desc",
+                },
+                headers={
+                    "Authorization": f"Bearer {settings.ads_api_token}",
+                    "User-Agent": "research-api/0.1 (heliophysics paper lookup)",
+                },
+            )
+        except httpx.ReadTimeout:
+            logger.warning(
+                "ads_broad_search_timeout",
+                start_date=start_date,
+                end_date=end_date,
+            )
+            return []
+
+        if response.status_code == 429:
+            logger.warning(
+                "ads_rate_limited",
+                retry_after=response.headers.get("Retry-After", "unknown"),
+            )
+            return []
+
+        if response.status_code != 200:
+            logger.warning(
+                "ads_broad_search_failed",
+                status_code=response.status_code,
+            )
+            return []
+
+        data = response.json()
+        docs = data.get("response", {}).get("docs", [])
+        bibcodes = [doc["bibcode"] for doc in docs if "bibcode" in doc]
+
+        logger.info(
+            "ads_broad_search_complete",
+            start_date=start_date,
+            end_date=end_date,
+            journals=len(SOLAR_PHYSICS_JOURNAL_BIBSTEMS),
+            papers_found=len(bibcodes),
+        )
+        return bibcodes
+
 
 async def ingest_from_ads(
     start_date: str,
@@ -311,6 +388,7 @@ async def ingest_from_ads(
         "inertial modes OR rossby waves OR helioseismology"
     ),
     max_results: int = 100,
+    mode: str = "keyword",
 ) -> IngestionResult:
     """Ingest heliophysics papers from NASA ADS within a date range.
 
@@ -325,15 +403,20 @@ async def ingest_from_ads(
         keywords (str): Search keywords to narrow results. Defaults
             to core heliophysics terms.
         max_results (int): Maximum papers to retrieve. Defaults to 100.
+        mode (str): Ingestion mode. Either "keyword" or "broad".
 
     Returns:
         IngestionResult: Summary of what was ingested, skipped,
             rejected, and failed.
     """
-    log = logger.bind(start_date=start_date, end_date=end_date)
-    log.info("ads_ingestion_started", keywords=keywords)
+    log = logger.bind(start_date=start_date, end_date=end_date, mode=mode)
+    log.info("ads_ingestion_started", keywords=keywords if mode == "keyword" else "(broad — all journals)")
 
-    bibcodes = await _search_ads(keywords, start_date, end_date, max_results)
+    if mode == "broad":
+        effective_max = max_results if max_results != 100 else 500
+        bibcodes = await _search_ads_broad(start_date, end_date, effective_max)
+    else:
+        bibcodes = await _search_ads(keywords, start_date, end_date, max_results)
     log.info("ads_ids_collected", total_unique=len(bibcodes))
 
     result = IngestionResult(
