@@ -38,11 +38,12 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
     text = f"{title} {abstract or ''}".lower()
     return any(keyword.lower() in text for keyword in HELIOPHYSICS_KEYWORDS)
 
+
 target_phrases = {
     "inertial mode",
-    "inertial wave",      
+    "inertial wave",
     "rossby mode",
-    "rossby wave",        
+    "rossby wave",
     "inertial oscillation",
 }
 
@@ -52,24 +53,48 @@ solar_indicators = {
     "sun:",
     "on the sun",
     "in the sun",
-    " sun ",              
+    " sun ",
     "sunspot",
-    "heliosphere",
     "helioseismology",
-    "photosphere",
-    "chromosphere",
-    "corona",
     "solar interior",
-    "solar convection",
+    "solar convection zone",
+    "solar wind",
+    "solar corona",
+    "solar cycle",
 }
+
+non_solar_indicators = {
+    "solar-type star",
+    "solar-type stars",
+    "white dwarf",
+    "white dwarfs",
+    "accreting",
+    "pre-main-sequence",
+    "pms star",
+    "cataclysmic variable",
+    "dwarf novae",
+    "neutron star",
+    "exoplanet",
+    "planetary",
+    "planet ",
+}
+
+
+def _is_non_solar(title: str, abstract: Optional[str]) -> bool:
+    """Return True if paper is clearly about non-solar objects."""
+    text = f"{title} {abstract or ''}".lower()
+    return any(indicator in text for indicator in non_solar_indicators)
+
 
 def _has_target_phrase(title: str, abstract: Optional[str]) -> bool:
     text = f"{title} {abstract or ''}".lower()
     return any(phrase in text for phrase in target_phrases)
 
+
 def _has_solar_indicator(title: str, abstract: Optional[str]) -> bool:
     text = f"{title} {abstract or ''}".lower()
     return any(indicator in text for indicator in solar_indicators)
+
 
 def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
     """Check if a paper is heliophysics-related by its journal name.
@@ -552,6 +577,7 @@ def _normalize_ads(
         url=ads_url,
     )
 
+
 async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by DOI.
 
@@ -613,7 +639,6 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
 
     log.info("fetch_complete", duration_ms=duration_ms, source="crossref")
     return _normalize_crossref(doi, crossref_data, citation_count)
-
 
 
 async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError:
@@ -683,6 +708,7 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     log.info("fetch_complete", duration_ms=duration_ms, source="arxiv")
     return _normalize_arxiv(clean_id, arxiv_data, citation_count)
 
+
 async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
     """Fetch and validate a heliophysics paper by ADS bibcode.
 
@@ -737,6 +763,12 @@ async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
             reason="Paper does not appear to be solar/heliophysics-related.",
             title=title,
         )
-
+    if _is_non_solar(title, abstract):
+        log.warning("non_solar_object", duration_ms=duration_ms)
+        return DomainValidationError(
+            identifier=bibcode,
+            reason="Paper is about non-solar objects (white dwarfs, other stars, planets).",
+            title=title,
+        )
     log.info("fetch_complete", duration_ms=duration_ms, source="ads")
     return _normalize_ads(bibcode, ads_data)
