@@ -113,7 +113,9 @@ def ingest_daterange(start: str, end: str, max_per_category: int) -> None:
     print_result(r.json(), "arXiv date range")
 
 
-def ingest_ads(start: str, end: str, keywords: str, max_results: int, mode: str = "keyword") -> None:
+def ingest_ads(
+    start: str, end: str, keywords: str, max_results: int, mode: str = "keyword"
+) -> None:
     """Fetch heliophysics papers from NASA ADS within a date range.
 
     Hits POST /papers/ingest/ads. ADS is preferred over arXiv for
@@ -129,7 +131,9 @@ def ingest_ads(start: str, end: str, keywords: str, max_results: int, mode: str 
     """
 
     if mode == "broad":
-        print(f"\nFetching ALL solar physics papers from ADS journals ({start} to {end})...")
+        print(
+            f"\nFetching ALL solar physics papers from ADS journals ({start} to {end})..."
+        )
         print("Mode: broad (no keyword filter — sweeping ApJ, A&A, SoPh, JGRA, etc.)\n")
     else:
         print(f"\nFetching ADS papers from {start} to {end}...")
@@ -147,6 +151,7 @@ def ingest_ads(start: str, end: str, keywords: str, max_results: int, mode: str 
         )
         r.raise_for_status()
     print_result(r.json(), f"NASA ADS ({mode} mode)")
+
 
 def run_interactive() -> None:
     """Walk the user through ingestion choices interactively.
@@ -227,6 +232,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Max results (ADS) or max per category (arXiv). Default 100.",
     )
+    
+    parser.add_argument(
+    "--keywords",
+    help="Comma-separated keywords for ADS. Defaults to keywords.py.",
+    )
+    
     parser.add_argument(
         "--mode",
         choices=["keyword", "broad"],
