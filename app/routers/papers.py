@@ -635,6 +635,11 @@ async def ingest_from_ads_endpoint(
     max_results: int = Query(default=100),
     keywords: str = Query(
         default=('abs:"inertial modes" OR abs:"rossby waves"'),
+        description="ADS keyword expression (keyword mode only).",
+    ),
+    mode: str = Query(
+        default="keyword",
+        description="'keyword': filter by keywords. 'broad': sweep all core journals.",
     ),
 ):
     """Ingest heliophysics papers from NASA ADS within a date range.
@@ -652,11 +657,20 @@ async def ingest_from_ads_endpoint(
     Returns:
         dict: Ingestion summary with counts and newly ingested bibcodes.
     """
+    if mode not in ("keyword", "broad"):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid mode '{mode}'. Must be 'keyword' or 'broad'.",
+        )
+
     result = await ingest_from_ads(
         start_date=start_date,
         end_date=end_date,
         keywords=keywords,
         max_results=max_results,
+        mode=mode,
     )
     return {
         "start_date": start_date,
