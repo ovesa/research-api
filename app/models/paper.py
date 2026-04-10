@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, field_validator, model_validator, ConfigDict
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -84,6 +84,19 @@ HELIOPHYSICS_KEYWORDS = {
     "eigenfrequency",
 }
 
+# ADS bibcode patterns for conference abstracts to skip
+# confE = oral presentations, confP = poster abstracts
+# Distinguished from proceedings *papers* which have volume/page numbers
+EXCLUDED_BIBCODE_PATTERNS = {
+    "confE",  # conference oral abstract
+    "confP",  # conference poster abstract
+}
+
+
+def is_conference_abstract(bibcode: str) -> bool:
+    """Return True if this bibcode is a conference abstract, not a paper."""
+    return any(pattern in bibcode for pattern in EXCLUDED_BIBCODE_PATTERNS)
+
 
 class IdentifierType(str, Enum):
     """The supported paper identifier formats.
@@ -97,6 +110,7 @@ class IdentifierType(str, Enum):
     doi = "doi"
     arxiv = "arxiv"
     ads = "ads"
+
 
 
 class Author(BaseModel):
@@ -118,6 +132,11 @@ class Author(BaseModel):
     affiliation: Optional[str] = None
     orcid: Optional[str] = None
 
+    model_config = ConfigDict(populate_by_name=True)
+
+    def model_dump(self, **kwargs):
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
 
 class PaperMetadata(BaseModel):
     """Normalized metadata structure returned for every heliophysics paper.

@@ -39,10 +39,11 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
     return any(keyword.lower() in text for keyword in HELIOPHYSICS_KEYWORDS)
 
 target_phrases = {
-    "inertial modes",
-    "inertial waves",
-    "rossby modes",
-    "rossby waves",
+    "inertial mode",
+    "inertial wave",      
+    "rossby mode",
+    "rossby wave",        
+    "inertial oscillation",
 }
 
 solar_indicators = {
@@ -51,6 +52,15 @@ solar_indicators = {
     "sun:",
     "on the sun",
     "in the sun",
+    " sun ",              
+    "sunspot",
+    "heliosphere",
+    "helioseismology",
+    "photosphere",
+    "chromosphere",
+    "corona",
+    "solar interior",
+    "solar convection",
 }
 
 def _has_target_phrase(title: str, abstract: Optional[str]) -> bool:
