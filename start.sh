@@ -10,6 +10,7 @@ echo "Waiting for postgres to be ready..."
 until docker compose exec postgres pg_isready -U researchapi -q; do
   sleep 1
 done
+sleep 2 
 echo "Postgres is ready."
 
 echo "Running migrations..."
