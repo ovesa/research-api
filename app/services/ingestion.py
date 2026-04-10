@@ -8,9 +8,10 @@ from app.models.paper import (
     HELIOPHYSICS_ARXIV_CATEGORIES,
     SOLAR_PHYSICS_JOURNAL_BIBSTEMS,
     DomainValidationError,
+    is_conference_abstract,
 )
-from app.services.database import get_paper, save_paper
 
+from app.services.database import get_paper, save_paper
 logger = structlog.get_logger(__name__)
 
 
@@ -303,6 +304,7 @@ async def _search_ads(
         )
         return bibcodes
 
+
 async def _search_ads_broad(
     start_date: str,
     end_date: str,
@@ -384,9 +386,7 @@ async def _search_ads_broad(
 async def ingest_from_ads(
     start_date: str,
     end_date: str,
-    keywords: str = (
-        "inertial modes OR rossby waves OR helioseismology"
-    ),
+    keywords: str = ("inertial modes OR rossby waves OR helioseismology"),
     max_results: int = 100,
     mode: str = "keyword",
 ) -> IngestionResult:
@@ -410,7 +410,10 @@ async def ingest_from_ads(
             rejected, and failed.
     """
     log = logger.bind(start_date=start_date, end_date=end_date, mode=mode)
-    log.info("ads_ingestion_started", keywords=keywords if mode == "keyword" else "(broad — all journals)")
+    log.info(
+        "ads_ingestion_started",
+        keywords=keywords if mode == "keyword" else "(broad — all journals)",
+    )
 
     if mode == "broad":
         effective_max = max_results if max_results != 100 else 500
@@ -430,6 +433,10 @@ async def ingest_from_ads(
 
     for bibcode in bibcodes:
         try:
+            if is_conference_abstract(bibcode):
+                result.rejected += 1
+                log.info("ads_ingestion_skipped", bibcode=bibcode, reason="conference_abstract")
+                continue
             existing = await get_paper(bibcode)
             if existing:
                 result.already_stored += 1
