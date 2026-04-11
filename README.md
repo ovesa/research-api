@@ -1,6 +1,6 @@
 # Heliophysics Paper API
 
-I am a postdoc at Stanford working in solar physics, and I built this project while transitioning into industry. The problem it solves is one I ran into constantly during my research: there is no clean programmatic way to search and retrieve heliophysics papers across arXiv and journal databases. Solar physics gets buried inside stellar astrophysics categories on arXiv, and you end up manually scrolling through listings that have nothing to do with what you are looking for. So I built this API to fix that for myself, and then kept adding to it until it became something I would actually want to show in an interview.
+I am a postdoc at Stanford working in solar physics, and I built this project while transitioning into industry. The problem it solves is one I ran into constantly during my research: there is no clean programmatic way to search and retrieve heliophysics papers across arXiv and journal databases. Solar physics gets buried inside stellar astrophysics categories on arXiv, and you end up manually scrolling through listings that have nothing to do with what you are looking for. So I built this API to fix that for myself, and then kept adding to it until it became a full research assistant I actually use daily.
 
 This was also my first real backend project. I used it to learn FastAPI, async Python, Redis, PostgreSQL, and production patterns like structured logging and multi-layer caching.
 
@@ -10,9 +10,12 @@ This was also my first real backend project. I used it to learn FastAPI, async P
 
 - Look up any heliophysics paper by DOI, arXiv ID, or NASA ADS bibcode and get normalized metadata back
 - Validate that papers are actually heliophysics-related and reject everything else with a clear explanation
+- Ingest papers from NASA ADS by keyword and date range with two modes: focused keyword filtering or broad journal sweep
 - Full text search across a curated collection using Postgres native search with relevance ranking
 - Filter by specific keywords with exact substring matching and optional `match_all` mode
-- Bulk ingest papers from arXiv, NASA ADS, or a specific date range using CLI tools
+- **Extract structured research metadata from paper abstracts using Claude**  (methods, key findings, instruments, wave types, theoretical frameworks, open questions, numerical values, and more)
+- **Research agent UI**: ask plain-English questions about your literature collection and get a detailed researcher-level synthesis citing specific papers
+- **Export to BibTeX**: fetch official ADS BibTeX entries and write a `.bib` file for LaTeX, with keyword and relevance filtering
 - Manually correct records with PATCH or remove them with DELETE
 - Paginated and sortable list endpoint with navigation metadata baked into every response
 - Rate limited lookup endpoint to protect upstream APIs from abuse
@@ -22,7 +25,7 @@ This was also my first real backend project. I used it to learn FastAPI, async P
 
 ## Architecture
 
-`````text
+```text
 Client
   |
   v
@@ -30,14 +33,16 @@ FastAPI (async) -- rate limited, structured logging, request tracing
   |
   |-- Redis Cache (~2ms for cached papers)
   |
-  |-- PostgreSQL (permanent storage + full text search + GIN index)
+  |-- PostgreSQL (permanent storage + full text search + extractions)
+  |
+  |-- Anthropic API (Claude — abstract extraction + research synthesis)
   |
   └-- External APIs (fired concurrently via asyncio.gather)
-        |-- CrossRef          (DOI metadata)
+        |-- NASA ADS          (published paper metadata + BibTeX + citation counts)
         |-- arXiv             (preprint metadata)
-        |-- NASA ADS          (published paper metadata + citation counts)
+        |-- CrossRef          (DOI metadata)
         └-- Semantic Scholar  (citation count fallback)
-`````
+```
 
 Every request checks Redis first, then Postgres, then hits external APIs only if needed:
 
@@ -47,7 +52,7 @@ Every request checks Redis first, then Postgres, then hits external APIs only if
 | Postgres hit | ~14ms |
 | External API fetch | ~400ms |
 
-That is roughly a 200x speedup from caching on repeated lookups, which shows up clearly in the request logs.
+Claude abstract extractions are cached in Postgres so the same paper is never processed twice regardless of how many times the extraction endpoint or research agent is called.
 
 ---
 
@@ -63,7 +68,7 @@ That is roughly a 200x speedup from caching on repeated lookups, which shows up 
 | Migrations | Alembic |
 | Logging | structlog |
 | Rate limiting | slowapi |
-| Testing | pytest + pytest-asyncio |
+| AI | Anthropic Claude (claude-sonnet-4) |
 | Infrastructure | Docker + docker-compose |
 
 ---
@@ -76,31 +81,39 @@ You need Docker and Python 3.12+.
 git clone https://github.com/ovesa/research-api.git
 cd research-api
 
-# start postgres and redis
-docker compose up -d
+# copy and fill in your environment variables
+cp .env.example .env
+# add your NASA ADS token and Anthropic API key to .env
 
-# install dependencies
+# start everything (Docker + migrations + API)
+./start.sh
+```
+
+Go to `http://localhost:8000/docs` for the interactive API docs.
+
+Open `agent.html` in your browser for the research assistant UI.
+
+You will need:
+
+- A NASA ADS API key (free at <https://ui.adsabs.harvard.edu/user/settings/token>)
+- An Anthropic API key (<https://console.anthropic.com> used for extraction and the research agent)
+
+### Manual setup
+
+```bash
+docker compose up -d
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# copy and fill in your environment variables
-cp .env.example .env
-
-# run migrations
-alembic upgrade head
-
-# start the api
+alembic upgrade heads
 uvicorn app.main:app --reload
 ```
-
-Go to `http://localhost:8000/docs` and everything is interactive there.
-
-You will need an API key for NASA ADS, which you can get for free at <https://ui.adsabs.harvard.edu/user/settings/token>
 
 ---
 
 ## API endpoints
+
+### Papers
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
@@ -111,13 +124,25 @@ You will need an API key for NASA ADS, which you can get for free at <https://ui
 | `GET` | `/papers/filter` | Filter by explicit keywords with match_all support |
 | `PATCH` | `/papers/{identifier}` | Partially update a stored paper |
 | `DELETE` | `/papers/{identifier}` | Remove a paper from the collection |
+| `POST` | `/papers/{identifier}/extract` | Extract structured metadata from abstract using Claude |
 | `POST` | `/papers/ingest/arxiv` | Ingest latest papers from heliophysics arXiv categories |
-| `POST` | `/papers/ingest/ads` | Ingest papers from NASA ADS by date range and keywords |
+| `POST` | `/papers/ingest/ads` | Ingest from NASA ADS by date range, keywords, and mode |
 | `POST` | `/papers/ingest/daterange` | Ingest arXiv papers submitted in a specific date range |
 | `POST` | `/papers/ingest/ids` | Ingest a specific list of arXiv IDs |
 | `GET` | `/papers/stats` | Collection statistics |
 | `GET` | `/papers/metrics` | Cache hit/miss rates |
 | `GET` | `/papers/health` | Health check |
+
+### Research Agent
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `POST` | `/agent/query` | Ask a plain-English research question, get a literature synthesis |
+
+### Health
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
 | `GET` | `/health/live` | Liveness check |
 | `GET` | `/health/ready` | Readiness check (verifies Postgres and Redis) |
 
@@ -125,129 +150,217 @@ You will need an API key for NASA ADS, which you can get for free at <https://ui
 
 ## Usage
 
-### Look up a paper
-
-```bash
-# by DOI
-curl -X POST http://localhost:8000/papers/lookup \
-  -H "Content-Type: application/json" \
-  -d '{"identifier": "10.1007/s11207-021-01842-0", "identifier_type": "doi"}'
-
-# by arXiv ID
-curl -X POST http://localhost:8000/papers/lookup \
-  -H "Content-Type: application/json" \
-  -d '{"identifier": "2509.19847", "identifier_type": "arxiv"}'
-
-# by ADS bibcode
-curl -X POST http://localhost:8000/papers/lookup \
-  -H "Content-Type: application/json" \
-  -d '{"identifier": "2026ApJ...997L..22H", "identifier_type": "ads"}'
-```
-
-Identifiers are validated against regex patterns before any external API is called. A malformed DOI or arXiv ID gets rejected immediately with a clear 422 error rather than a slow failed fetch.
-
-### Search
-
-```bash
-curl "http://localhost:8000/papers/search?q=solar+wind+magnetic+field"
-curl "http://localhost:8000/papers/search?q=magnetohydrodynamic&limit=5&offset=0"
-```
-
-Uses Postgres `tsvector` with `ts_rank` scoring. Title matches rank higher than abstract matches. Stemming is handled automatically, so `magnetohydrodynamic` matches `magnetohydrodynamics`. Every response includes pagination metadata: `total_pages`, `has_next`, `has_prev`, and `next_offset`.
-
-### Filter by keywords
-
-```bash
-# any keyword matches (default)
-curl "http://localhost:8000/papers/filter?keywords=inertial+modes,rossby+waves"
-
-# all keywords must match
-curl "http://localhost:8000/papers/filter?keywords=helioseismology,solar&match_all=true"
-```
-
-Unlike search, filtering uses exact case-insensitive substring matching with no stemming or relevance ranking. Useful when you want papers that specifically contain a term rather than anything semantically related to it.
-
-### List and sort
-
-```bash
-# sort by citation count
-curl "http://localhost:8000/papers/?sort_by=citation_count&sort_order=desc&limit=10"
-
-# sort alphabetically
-curl "http://localhost:8000/papers/?sort_by=title&sort_order=asc"
-```
-
-Allowed sort fields: `fetched_at`, `published_date`, `citation_count`, `title`.
-
 ### Ingest papers
 
 ```bash
 # interactive CLI (prompts for everything)
 python ingest.py
 
-# non-interactive
-python ingest.py --source ads --start 2025-01 --end 2026-04
+# focused keyword ingestion
+python ingest.py --source ads --start 2023-01 --end 2026-05 \
+  --keywords "inertial modes,rossby waves,inertial waves" --max 100
+
+# broad journal sweep — all papers from ApJ, A&A, SoPh, JGRA etc.
+python ingest.py --source ads --start 2024-01 --end 2026-05 --mode broad
+
+# from arXiv
 python ingest.py --source arxiv --max 50
-python ingest.py --source ads --keywords "inertial modes,rossby waves"
 ```
 
-### Backfill missing data
+Two ingestion modes are available for ADS:
+
+- **keyword** (default): filters by abstract keyword expression. Only papers mentioning your terms are retrieved.
+- **broad**: sweeps all papers published in 14 core heliophysics journals with no keyword filter. Use this to build a complete baseline collection.
+
+### Extract structured metadata
 
 ```bash
-# dry run first to see what would be fixed
+curl -X POST "http://localhost:8000/papers/2025ApJ...989...26D/extract"
+```
+
+Returns a rich structured extraction including:
+
+```json
+{
+  "central_contribution": "...",
+  "relevance_to_solar_inertial_modes": "primary",
+  "data_type": "observational",
+  "methods": ["time-distance helioseismology", "..."],
+  "key_findings": [{"finding": "...", "type": "measurement", "confidence": "definitive"}],
+  "instruments": ["SDO/HMI", "GONG"],
+  "wave_types": ["high-latitude inertial modes"],
+  "solar_region": ["polar region", "convection zone"],
+  "azimuthal_orders": ["m=1"],
+  "physical_parameters": ["differential rotation", "phase velocity"],
+  "measured_quantities": ["mode power", "mode lifetime"],
+  "constrained_quantities": ["differential rotation profile"],
+  "theoretical_framework": [],
+  "numerical_values": [{"quantity": "tracking latitude", "value": "65", "unit": "degrees"}],
+  "solar_cycle_phase": "",
+  "cycle_dependence": "yes",
+  "open_questions": ["need for deeper understanding of internal dynamics of low-m modes"],
+  "researcher_summary": "...",
+}
+```
+
+Extractions are cached in Postgres. Calling the endpoint again returns the cached result instantly without calling Claude.
+
+### Research agent
+
+Open `agent.html` in your browser. Ask questions like:
+
+- *What are the open questions in inertial mode research?*
+- *Summarize what we know about the solar cycle dependence of Rossby waves*
+- *What are the differences between observationally identified inertial modes?*
+- *What theoretical frameworks have been used to model inertial modes?*
+- *How could I expand on current work in this field?*
+
+The agent chains four steps: intent parsing → paper search → extraction (cached) → Claude synthesis. Returns a detailed literature review citing papers by author and year, followed by paper cards with ADS links.
+
+Or call the endpoint directly:
+
+```bash
+curl -X POST "http://localhost:8000/agent/query" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the open questions in inertial mode research?"}'
+```
+
+### Export to BibTeX
+
+Fetches official BibTeX entries directly from NASA ADS:
+
+```bash
+# export everything
+python export_bibtex.py --output refs.bib
+
+# filter by keyword
+python export_bibtex.py --keywords "inertial modes,rossby waves" --output inertial.bib
+
+# filter by Claude extraction relevance
+python export_bibtex.py --relevance primary --output primary.bib
+
+# combine filters
+python export_bibtex.py --keywords "inertial modes" --relevance primary \
+  --start 2023-01 --output recent_primary.bib
+```
+
+### Look up a paper
+
+```bash
+# by ADS bibcode
+curl -X POST http://localhost:8000/papers/lookup \
+  -H "Content-Type: application/json" \
+  -d '{"identifier": "2025ApJ...989...26D", "identifier_type": "ads"}'
+
+# by arXiv ID
+curl -X POST http://localhost:8000/papers/lookup \
+  -H "Content-Type: application/json" \
+  -d '{"identifier": "2509.19847", "identifier_type": "arxiv"}'
+
+# by DOI
+curl -X POST http://localhost:8000/papers/lookup \
+  -H "Content-Type: application/json" \
+  -d '{"identifier": "10.1007/s11207-021-01842-0", "identifier_type": "doi"}'
+```
+
+### Search and filter
+
+```bash
+# full text search
+curl "http://localhost:8000/papers/search?q=solar+inertial+modes"
+
+# keyword filter
+curl "http://localhost:8000/papers/filter?keywords=inertial+modes,rossby+waves"
+
+# sort by citation count
+curl "http://localhost:8000/papers/?sort_by=citation_count&sort_order=desc&limit=10"
+```
+
+### Backfill and deduplicate
+
+```bash
+# dry run to preview
 python backfill.py --dry-run --target all
 
-# fix missing URLs
+# fix missing URLs and citations
 python backfill.py --target urls
-
-# refresh stale citation counts
-# tries Semantic Scholar first, falls back to NASA ADS
 python backfill.py --target citations
-```
 
-### Deduplicate
-
-```bash
-# preview what would be merged
+# deduplicate
 python deduplicate.py --dry-run
-
-# auto-merge records sharing the same DOI, keeping the richer one
 python deduplicate.py --merge
-```
-
-### Patch and delete
-
-```bash
-# fix a missing journal
-curl -X PATCH "http://localhost:8000/papers/2512.16028" \
-  -H "Content-Type: application/json" \
-  -d '{"journal": "The Astrophysical Journal"}'
-
-# remove a paper
-curl -X DELETE "http://localhost:8000/papers/2509.19847"
 ```
 
 ---
 
 ## Heliophysics validation
 
-This was the part I found most interesting to build because I actually know what the data should look like from my research background.
+Papers are validated at ingestion time through several layers:
 
-For **arXiv papers**: the primary category must be `astro-ph.SR` or `physics.space-ph`. A secondary tag alone does not qualify. A plasma physics paper that also carries a heliophysics tag gets rejected.
+**Domain validation**: papers must contain target phrases (inertial modes, rossby waves, inertial waves etc.) and solar indicators (solar, the Sun, sunspot, helioseismology etc.) in title or abstract.
 
-For **DOI and ADS papers**: the journal must be on a curated heliophysics whitelist, or heliophysics keywords must appear in the title or abstract. This handles papers published in broad journals like Nature or ApJ.
+**Non-solar filter**: papers about white dwarfs, accreting systems, pre-main-sequence stars, cataclysmic variables, exoplanets, or Earth/climate science are rejected even if they mention Rossby waves or inertial modes in passing.
 
-There is also a secondary filter that catches papers slipping through keyword matching because they mention plasma or magnetic fields but are actually about neutron stars, black holes, exoplanets, or stellar evolution. Those get rejected even if they pass the primary checks.
+**Journal blocklist**: papers from journals outside the heliophysics scope (Journal of Climate, Journal of Geophysical Research Atmospheres, Atmospheric Research etc.) are rejected.
 
-Rejected papers come back with a clear explanation:
+**Conference abstract filter**: AGU meeting abstracts, AMS meeting abstracts, DPS abstracts, and ADS confE/confP entries are filtered out. Full conference proceedings papers with proper volume and page numbers are allowed.
+
+Rejected papers return a clear explanation:
 
 ```json
 {
-  "identifier": "10.1038/nature12373",
-  "reason": "Journal 'Nature' is not on the heliophysics whitelist and no heliophysics keywords were found in the title or abstract.",
+  "identifier": "2024DPS....5631003M",
+  "reason": "Paper is about non-solar objects (white dwarfs, other stars, planets).",
   "title": "..."
 }
 ```
+
+---
+
+## Claude abstract extraction
+
+The extraction prompt is designed specifically for solar inertial mode research. It uses a detailed heliophysics expert persona familiar with the domain topic and extracts 30+ structured fields per paper including:
+
+- `central_contribution`: one sentence summary of the paper's main contribution
+- `relevance_to_solar_inertial_modes`: primary / secondary / peripheral
+- `data_type`: observational / theoretical / computational / review / mixed
+- `key_findings`: structured with type (detection, measurement, constraint, theoretical, null_result) and confidence (definitive, tentative, marginal)
+- `wave_types`, `solar_region`, `azimuthal_orders`: domain-specific classification
+- `measured_quantities` vs `constrained_quantities`: important scientific distinction
+- `theoretical_framework`: physical models used
+- `numerical_values`: structured as `{quantity, value, unit}` for queryability
+- `cycle_dependence`, `solar_cycle_phase`, `solar_activity_level`
+- `dispersion_relation_discussed`, `eigenfunction_computed`
+- `open_questions`: explicitly unresolved questions from the paper
+- `researcher_summary`: 2-3 sentence expert commentary on why the paper matters
+
+All extractions are cached in Postgres. The research agent uses cached extractions so Claude is never called twice for the same paper.
+
+---
+
+## Database schema
+
+Two main tables:
+
+**papers**: one row per ingested paper with identifier, title, authors (JSON), abstract, published_date, journal, doi, arxiv_id, citation_count, source, url.
+
+**extractions**: one row per Claude extraction, foreign-keyed to papers with CASCADE delete. Contains all 30+ structured fields plus the raw Claude response for debugging.
+
+---
+
+## Design decisions
+
+**asyncpg over SQLAlchemy**: writing actual SQL makes Postgres-specific features like full text search straightforward to reason about directly.
+
+**Postgres full text search over Elasticsearch**: keeps the stack simple without sacrificing search quality at this scale.
+
+**NASA ADS as primary source**: ADS returns richer metadata than CrossRef for astronomy papers — abstracts are almost always present, author lists are complete, and citation counts come back directly.
+
+**Extraction caching**: Claude is expensive and slow relative to a database lookup. Caching extractions in Postgres means the research agent can synthesize across many papers without calling Claude once per paper per query.
+
+**`identifier` as primary key**: DOIs and ADS bibcodes are already globally unique. Using them directly avoids a separate lookup step and makes idempotent inserts with `ON CONFLICT DO NOTHING` trivial.
+
+**Two-mode ADS ingestion**: keyword mode for focused collection building around specific topics; broad mode for sweeping entire journals to ensure nothing is missed.
 
 ---
 
@@ -259,28 +372,8 @@ pytest tests/ -v
 
 52 tests covering unit tests for all domain validation functions and integration tests for every API endpoint. External APIs, the database, and Redis are all mocked so tests run in under a second with no external dependencies.
 
-The test suite caught two real bugs during development: a missing keyword (`magnetosphere`) in the validation set, and a case-sensitivity bug where uppercase acronyms like `SDO` and `MHD` in the keyword list were never matching lowercased input text.
-
----
-
-## Design decisions
-
-**asyncpg over SQLAlchemy**: I wanted to write actual SQL rather than work through an ORM abstraction. It also made using Postgres full text search features (`tsvector`, `ts_rank`, GIN indexes) more straightforward to reason about directly.
-
-**Postgres full text search over Elasticsearch**: Elasticsearch adds real operational complexity for a project at this scale. Postgres handles it well and keeps the stack simple.
-
-**NASA ADS as primary source for published papers**: ADS returns richer metadata than CrossRef for astronomy papers. Abstracts are almost always present, author lists are complete, and citation counts come back directly without needing a separate Semantic Scholar call.
-
-**Sequential arXiv category ingestion**: arXiv asks for a maximum of 4 requests per second. Firing all category searches concurrently would risk triggering rate limiting, so they run sequentially with a pause between each one.
-
-**`identifier` as primary key**: DOIs and arXiv IDs are already globally unique. Using them directly as the primary key avoids a separate lookup step and makes idempotent inserts with `ON CONFLICT DO NOTHING` trivial.
-
-**Caching rejections in Redis but not Postgres**: if someone submits an invalid identifier repeatedly, the rejection is cached so the external API is not called again. But rejections are not stored in Postgres because that table is meant to be a curated collection of validated papers only.
-
-**ADS fallback for citation counts**: Semantic Scholar does not index recent preprints reliably. When it returns nothing, the backfill tool falls back to NASA ADS, which tends to have citation data even for papers a few months old.
-
 ---
 
 ## Acknowledgements
 
-Thank you to arXiv for use of its open access interperability.
+Thank you to arXiv for use of its open access interoperability, and to NASA ADS for providing a free API with BibTeX export.
