@@ -20,14 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    op.drop_index("ix_papers_search_vector", "papers", if_exists=True)
-    op.drop_column("papers", "search_vector")
-    op.drop_column("papers", "arxiv_categories")
-
+    pass  # columns already removed manually from database
 
 def downgrade():
-    op.add_column(
-        "papers",
-        sa.Column("arxiv_categories", sa.JSON(), nullable=False, server_default="[]"),
-    )
-    op.add_column("papers", sa.Column("search_vector", sa.Text(), nullable=True))
+    pass

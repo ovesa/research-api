@@ -14,7 +14,7 @@ sleep 2
 echo "Postgres is ready."
 
 echo "Running migrations..."
-alembic upgrade head
+alembic upgrade heads
 
 echo "Starting API..."
 uvicorn app.main:app --reload
