@@ -77,12 +77,12 @@ non_solar_indicators = {
     "neutron star",
     "exoplanet",
     "kepler star",
-    "kic ",                    # Kepler Input Catalog IDs
+    "kic ",             
     "Kepler",
     "TESS",
     "Gaia",
 
-    # Earth/climate/atmosphere
+    # Earth-based
     "monsoon",
     "sea ice",
     "precipitation",
