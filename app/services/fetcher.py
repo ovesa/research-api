@@ -126,6 +126,7 @@ EXCLUDED_JOURNALS = {
     "ocean-land-atmosphere research",
     "palaeogeography palaeoclimatology palaeoecology",
     "mausam",
+    "EPSC-DPS Joint Meeting 2025",
 }
 
 def _is_excluded_journal(journal: Optional[str]) -> bool:
