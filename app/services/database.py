@@ -28,7 +28,7 @@ async def save_paper(paper: PaperMetadata) -> None:
             """
             INSERT INTO papers (
                 identifier, identifier_type, title, authors, abstract,
-                published_date, journal, doi, arxiv_id, arxiv_categories,
+                published_date, journal, doi, arxiv_id,
                 citation_count, source, fetched_at, url
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -255,12 +255,6 @@ def _row_to_paper(row) -> PaperMetadata:
         if isinstance(row["authors"], str)
         else row["authors"]
     )
-    categories_raw = (
-        json.loads(row["arxiv_categories"])
-        if isinstance(row["arxiv_categories"], str)
-        else row["arxiv_categories"]
-    )
-
     authors = [Author(**a) for a in authors_raw]
 
     return PaperMetadata(
@@ -273,7 +267,6 @@ def _row_to_paper(row) -> PaperMetadata:
         journal=row["journal"],
         doi=row["doi"],
         arxiv_id=row["arxiv_id"],
-        arxiv_categories=categories_raw,
         citation_count=row["citation_count"],
         source=row["source"],
         fetched_at=row["fetched_at"],
