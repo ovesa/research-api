@@ -12,6 +12,7 @@ from app.models.paper import (
 )
 
 from app.services.database import get_paper, save_paper
+
 logger = structlog.get_logger(__name__)
 
 
@@ -435,7 +436,11 @@ async def ingest_from_ads(
         try:
             if is_conference_abstract(bibcode):
                 result.rejected += 1
-                log.info("ads_ingestion_skipped", bibcode=bibcode, reason="conference_abstract")
+                log.info(
+                    "ads_ingestion_skipped",
+                    bibcode=bibcode,
+                    reason="conference_abstract",
+                )
                 continue
             existing = await get_paper(bibcode)
             if existing:
