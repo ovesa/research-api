@@ -684,6 +684,76 @@ async def ingest_from_ads_endpoint(
     }
 
 
+@router.post(
+    "/{identifier}/extract",
+    summary="Extract structured data from a paper abstract using Claude",
+)
+async def extract_paper(identifier: str):
+    """Extract structured information from a paper's abstract using Claude.
+    Checks if an extraction already exists in Postgres and returns it
+    immediately if so. Claude is never called twice for the same paper.
+    If no extraction exists, sends the abstract to Claude and caches
+    the result.
+
+    Args:
+        identifier (str): ADS bibcode or arXiv ID of the paper.
+
+    Returns:
+        dict: Structured extraction containing:
+            - identifier: the paper identifier
+            - data_type: observational/theoretical/computational/review
+            - methods: list of methods used
+            - key_findings: list of main findings
+            - instruments: list of instruments or datasets
+            - extracted_at: when the extraction was performed
+            - cached: whether this was returned from cache
+
+    Raises:
+        404: If the paper is not found in the database.
+        400: If the paper has no abstract to extract from.
+    """
+    from app.services.database import get_paper
+    from app.services.extraction import (
+        extract_abstract,
+        get_extraction,
+        save_extraction,
+    )
+    from fastapi import HTTPException
+
+    # Look up paper in Postgres
+    paper = await get_paper(identifier)
+    if not paper:
+        raise HTTPException(status_code=404, detail=f"Paper '{identifier}' not found.")
+
+    # Return cached extraction if it exists
+    existing = await get_extraction(identifier)
+    if existing:
+        return {**existing, "cached": True}
+
+    # Need an abstract to extract from
+    if not paper.abstract:
+        raise HTTPException(
+            status_code=400,
+            detail="Paper has no abstract; cannot extract structured data.",
+        )
+
+    # Call Claude
+    result = await extract_abstract(identifier, paper.title, paper.abstract)
+
+    # Cache result in Postgres
+    await save_extraction(identifier, result)
+
+    return {
+        "identifier": identifier,
+        "data_type": result.get("data_type"),
+        "methods": result.get("methods"),
+        "key_findings": result.get("key_findings"),
+        "instruments": result.get("instruments"),
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "cached": False,
+    }
+
+
 @router.get(
     "/health",
     summary="Health check",

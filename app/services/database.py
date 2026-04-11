@@ -21,7 +21,6 @@ async def save_paper(paper: PaperMetadata) -> None:
     pool = await get_pool()
 
     authors_json = json.dumps([a.model_dump() for a in paper.authors])
-    categories_json = json.dumps(paper.arxiv_categories)
 
     async with pool.acquire() as conn:
         await conn.execute(
@@ -43,7 +42,6 @@ async def save_paper(paper: PaperMetadata) -> None:
             paper.journal,
             paper.doi,
             paper.arxiv_id,
-            categories_json,
             paper.citation_count,
             paper.source,
             paper.fetched_at,
