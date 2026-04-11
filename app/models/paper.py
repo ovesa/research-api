@@ -90,6 +90,9 @@ HELIOPHYSICS_KEYWORDS = {
 EXCLUDED_BIBCODE_PATTERNS = {
     "confE",  # conference oral abstract
     "confP",  # conference poster abstract
+    "DPS",      # Division for Planetary Sciences
+    "AGUFM",    # AGU Fall Meeting
+    "AAS",      # American Astronomical Society meeting
 }
 
 

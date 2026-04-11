@@ -61,6 +61,7 @@ solar_indicators = {
     "solar wind",
     "solar corona",
     "solar cycle",
+    "tachocline",
 }
 
 non_solar_indicators = {
@@ -75,10 +76,60 @@ non_solar_indicators = {
     "dwarf novae",
     "neutron star",
     "exoplanet",
-    "planetary",
-    "planet ",
+    "kepler star",
+    "kic ",                    # Kepler Input Catalog IDs
+
+    # Earth/climate/atmosphere
+    "monsoon",
+    "sea ice",
+    "precipitation",
+    "heatwave",
+    "heat wave",
+    "tibetan plateau",
+    "ocean",
+    "atmosphere",              # earth atmosphere context
+    "climate",
+    "el niño",
+    "el nino",
+    "enso",
+    "ozone",
+    "blocking",                # atmospheric blocking
+    "earth system model",
+    "sea surface temperature",
+    "boreal",
+    "paleoclimate",
+    "milankovitch",
+    "pleistocene",
+    "holocene",
+    "quaternary",
+    "volcanic eruption",
+    "greenness",
+    "eurasia",
+    "barents",
+    "indian ocean",
+    "pacific",
+    "atlantic",
 }
 
+EXCLUDED_JOURNALS = {
+    "journal of climate",
+    "journal of geophysical research",
+    "atmospheric research",
+    "climate dynamics",
+    "geophysical research letters",   # mostly earth science
+    "atmospheric chemistry & physics",
+    "atmosphere",
+    "environmental research letters",
+    "ocean-land-atmosphere research",
+    "palaeogeography palaeoclimatology palaeoecology",
+    "mausam",
+}
+
+def _is_excluded_journal(journal: Optional[str]) -> bool:
+    """Return True if this journal is outside heliophysics scope."""
+    if not journal:
+        return False
+    return journal.lower().strip() in EXCLUDED_JOURNALS
 
 def _is_non_solar(title: str, abstract: Optional[str]) -> bool:
     """Return True if paper is clearly about non-solar objects."""
@@ -747,6 +798,13 @@ async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
     titles = ads_data.get("title", [])
     title = titles[0] if titles else ""
     abstract = ads_data.get("abstract")
+    journal = ads_data.get("pub")
+    if _is_excluded_journal(journal):
+        return DomainValidationError(
+            identifier=bibcode,
+            reason=f"Journal '{journal}' is not a heliophysics journal.",
+            title=title,
+        )
 
     if not _has_target_phrase(title, abstract):
         log.warning("target_phrase_missing", duration_ms=duration_ms)
