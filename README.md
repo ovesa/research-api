@@ -1,6 +1,6 @@
 # Heliophysics Paper API
 
-I am a postdoc at Stanford working in solar physics, and I built this project while transitioning into industry. The problem it solves is one I ran into constantly during my research: there is no clean programmatic way to search and retrieve heliophysics papers across arXiv and journal databases. Solar physics gets buried inside stellar astrophysics categories on arXiv, and you end up manually scrolling through listings that have nothing to do with what you are looking for. So I built this API to fix that for myself, and then kept adding to it until it became a full research assistant I actually use daily.
+I am a postdoc working in solar physics, and I built this project while transitioning into industry. The problem it solves is one I ran into constantly during my research: there is no clean programmatic way to search and retrieve heliophysics papers across arXiv and journal databases. Solar physics gets buried inside stellar astrophysics categories on arXiv, and you end up manually scrolling through listings that have nothing to do with what you are looking for. So I built this API to fix that for myself, and then kept adding to it until it became a full research assistant I actually use daily.
 
 This was also my first real backend project. I used it to learn FastAPI, async Python, Redis, PostgreSQL, and production patterns like structured logging and multi-layer caching.
 
