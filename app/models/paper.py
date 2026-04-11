@@ -161,8 +161,6 @@ class PaperMetadata(BaseModel):
         journal (str | None): Journal or conference name if available.
         doi (str | None): DOI if known, even if lookup was via arXiv ID.
         arxiv_id (str | None): arXiv ID if known, even if lookup was via DOI.
-        arxiv_categories (list[str]): arXiv subject categories. Used to
-            validate heliophysics relevance for arXiv lookups.
         citation_count (int | None): From Semantic Scholar. Nullable because
             it is not always available especially for preprints.
         source (str): Which external API provided the primary data.
@@ -184,7 +182,6 @@ class PaperMetadata(BaseModel):
     journal: Optional[str] = None
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
-    arxiv_categories: list[str] = []
     citation_count: Optional[int] = None
     source: str
     fetched_at: datetime
