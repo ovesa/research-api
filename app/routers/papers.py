@@ -738,20 +738,49 @@ async def extract_paper(identifier: str):
         )
 
     # Call Claude
-    result = await extract_abstract(identifier, paper.title, paper.abstract)
+    result, raw_response = await extract_abstract(identifier, paper.title, paper.abstract)
 
     # Cache result in Postgres
-    await save_extraction(identifier, result)
+    await save_extraction(identifier, result, raw_response)
 
     return {
-        "identifier": identifier,
-        "data_type": result.get("data_type"),
-        "methods": result.get("methods"),
-        "key_findings": result.get("key_findings"),
-        "instruments": result.get("instruments"),
-        "extracted_at": datetime.now(timezone.utc).isoformat(),
-        "cached": False,
-    }
+            "identifier": identifier,
+            "central_contribution": result.get("central_contribution"),
+            "relevance_to_solar_inertial_modes": result.get("relevance_to_solar_inertial_modes"),
+            "data_type": result.get("data_type"),
+            "methods": result.get("methods"),
+            "key_findings": result.get("key_findings"),
+            "instruments": result.get("instruments"),
+            "wave_types": result.get("wave_types"),
+            "solar_region": result.get("solar_region"),
+            "azimuthal_orders": result.get("azimuthal_orders"),
+            "physical_parameters": result.get("physical_parameters"),
+            "measured_quantities": result.get("measured_quantities"),
+            "constrained_quantities": result.get("constrained_quantities"),
+            "theoretical_framework": result.get("theoretical_framework"),
+            "detection_method": result.get("detection_method"),
+            "observational_technique": result.get("observational_technique"),
+            "depth_range": result.get("depth_range"),
+            "radial_order": result.get("radial_order"),
+            "dispersion_relation_discussed": result.get("dispersion_relation_discussed"),
+            "eigenfunction_computed": result.get("eigenfunction_computed"),
+            "mode_identification_method": result.get("mode_identification_method"),
+            "numerical_values": result.get("numerical_values"),
+            "solar_cycle_phase": result.get("solar_cycle_phase"),
+            "cycle_dependence": result.get("cycle_dependence"),
+            "solar_activity_level": result.get("solar_activity_level"),
+            "magnetic_field_considered": result.get("magnetic_field_considered"),
+            "time_period": result.get("time_period"),
+            "agrees_with_theory": result.get("agrees_with_theory"),
+            "theoretical_prediction_tested": result.get("theoretical_prediction_tested"),
+            "confirms_previous_work": result.get("confirms_previous_work"),
+            "contradicts_previous_work": result.get("contradicts_previous_work"),
+            "open_questions": result.get("open_questions"),
+            "researcher_summary": result.get("researcher_summary"),
+            "extraction_notes": result.get("extraction_notes"),
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+            "cached": False,
+        }
 
 
 @router.get(
