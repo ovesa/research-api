@@ -90,7 +90,6 @@ non_solar_indicators = {
     "heat wave",
     "tibetan plateau",
     "ocean",
-    "atmosphere",              # earth atmosphere context
     "climate",
     "el niño",
     "el nino",
