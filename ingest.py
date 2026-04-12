@@ -68,18 +68,19 @@ def print_result(result: dict, source: str) -> None:
 
 def ingest_single(identifier: str) -> None:
     """Fetch and store a single paper by DOI, arXiv ID, or ADS bibcode.
-    Hits GET /papers/{identifier} which fetches from the appropriate
+    Hits POST /papers/lookup which fetches from the appropriate
     source and stores the result. Safe to rerun. Already stored papers
     are returned without duplication.
 
     Args:
         identifier (str): A DOI, arXiv ID, or ADS bibcode.
     """
-    import urllib.parse
-    encoded = urllib.parse.quote(identifier, safe="")
     print(f"\nFetching single paper: {identifier}")
     with httpx.Client(timeout=60) as client:
-        r = client.get(f"{base_url}/{encoded}")
+        r = client.post(
+            f"{base_url}/lookup",
+            json={"identifier": identifier, "identifier_type": "ads"},
+        )
         if r.status_code == 404:
             print(f"\nERROR: Paper not found: '{identifier}'")
             sys.exit(1)
