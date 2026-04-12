@@ -10,6 +10,7 @@
 #       python ingest.py --source arxiv --max 50
 #       python ingest.py --source ads --start 2025-01 --end 2026-04 --keywords "inertial modes,rossby waves"
 #       python ingest.py --source daterange --start 20250101 --end 20250131 --max 100
+#       python ingest.py --identifier 10.1000/j.jastp.2025.01.001
 
 import argparse
 import sys
@@ -65,6 +66,30 @@ def print_result(result: dict, source: str) -> None:
         print(f"  New IDs         : {', '.join(ids)}")
     print("───────────────────────────────────────────────────\n")
 
+def ingest_single(identifier: str) -> None:
+    """Fetch and store a single paper by DOI, arXiv ID, or ADS bibcode.
+    Hits GET /papers/{identifier} which fetches from the appropriate
+    source and stores the result. Safe to rerun. Already stored papers
+    are returned without duplication.
+
+    Args:
+        identifier (str): A DOI, arXiv ID, or ADS bibcode.
+    """
+    import urllib.parse
+    encoded = urllib.parse.quote(identifier, safe="")
+    print(f"\nFetching single paper: {identifier}")
+    with httpx.Client(timeout=60) as client:
+        r = client.get(f"{base_url}/{encoded}")
+        if r.status_code == 404:
+            print(f"\nERROR: Paper not found: '{identifier}'")
+            sys.exit(1)
+        r.raise_for_status()
+    data = r.json()
+    print("\n── Paper fetched ──────────────────────────────────")
+    print(f"  Title    : {data.get('title', 'N/A')}")
+    print(f"  Journal  : {data.get('journal', 'N/A')}")
+    print(f"  Published: {data.get('published_date', 'N/A')}")
+    print("───────────────────────────────────────────────────\n")
 
 def ingest_arxiv(max_per_category: int) -> None:
     """Fetch the latest heliophysics papers from arXiv. Hits
@@ -232,6 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--keywords",
         help="Comma-separated keywords for ADS. Defaults to keywords.py.",
     )
+    
 
     parser.add_argument(
         "--mode",
@@ -239,6 +265,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="keyword",
         help="'keyword': filter by keywords (default). 'broad': sweep all core journals.",
     )
+    
+    parser.add_argument(
+    "--identifier",
+    help="Single DOI, arXiv ID, or ADS bibcode to fetch and store.",
+)
+        
     return parser
 
 
@@ -248,6 +280,11 @@ def run_cli(args: argparse.Namespace) -> None:
     Args:
         args (argparse.Namespace): Parsed arguments from build_parser().
     """
+    
+    if args.identifier:
+        ingest_single(args.identifier)
+        return
+
     if args.source == "arxiv":
         ingest_arxiv(args.max)
 
