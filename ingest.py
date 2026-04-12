@@ -310,7 +310,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        if args.source:
+        if args.identifier:
+            ingest_single(args.identifier)
+        elif args.source:
             run_cli(args)
         else:
             run_interactive()
