@@ -76,10 +76,16 @@ def ingest_single(identifier: str) -> None:
         identifier (str): A DOI, arXiv ID, or ADS bibcode.
     """
     print(f"\nFetching single paper: {identifier}")
+    if identifier.startswith("10."):
+        id_type = "doi"
+    elif identifier.replace(".", "").isdigit() or (len(identifier) == 10 and identifier[:4].isdigit()):
+        id_type = "arxiv"
+    else:
+        id_type = "ads"
     with httpx.Client(timeout=60) as client:
         r = client.post(
             f"{base_url}/lookup",
-            json={"identifier": identifier, "identifier_type": "ads"},
+            json={"identifier": identifier, "identifier_type": id_type},
         )
         if r.status_code == 404:
             print(f"\nERROR: Paper not found: '{identifier}'")
@@ -281,10 +287,6 @@ def run_cli(args: argparse.Namespace) -> None:
     Args:
         args (argparse.Namespace): Parsed arguments from build_parser().
     """
-    
-    if args.identifier:
-        ingest_single(args.identifier)
-        return
 
     if args.source == "arxiv":
         ingest_arxiv(args.max)
