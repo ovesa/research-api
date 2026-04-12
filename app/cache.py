@@ -1,4 +1,5 @@
 import redis.asyncio as aioredis
+
 from app.config import settings
 
 redis = None
@@ -6,10 +7,9 @@ redis = None
 
 async def get_redis():
     """Return the shared async Redis client, creating it on first call.
-
     Uses a module-level singleton for the same reason as the Postgres
-    pool — one client shared across all requests rather than
-    reconnecting each time.
+    pool. One client shared across all requests rather than reconnecting
+    each time.
 
     Returns:
         redis.asyncio.Redis: The shared Redis client.
@@ -36,11 +36,9 @@ async def get_cached_paper(identifier: str) -> str | None:
 
 
 async def cache_paper(identifier: str, data: str) -> None:
-    """Store a paper's JSON representation in Redis with a TTL.
-
-    The TTL is set from config (default 24 hours). Papers are stable
-    documents so a long TTL is safe and keeps external API calls
-    to a minimum.
+    """Store a paper's JSON representation in Redis with a TTL. The
+    TTL is set from config (default 24 hours). Papers are stable documents
+    so a long TTL is safe and keeps external API calls to a minimum.
 
     Args:
         identifier (str): The DOI or arXiv ID used as the cache key.
@@ -54,10 +52,9 @@ async def cache_paper(identifier: str, data: str) -> None:
 
 
 async def delete_cached_paper(identifier: str) -> None:
-    """Remove a paper from the Redis cache by its identifier.
-
-    Called after a paper is deleted from Postgres to ensure stale
-    data is not served from cache after deletion.
+    """Remove a paper from the Redis cache by its identifier. Called
+    after a paper is deleted from Postgres to ensure stale data is not
+    served from cache after deletion.
 
     Args:
         identifier (str): The DOI or arXiv ID used as the cache key.

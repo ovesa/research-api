@@ -36,6 +36,7 @@ from app.services.ingestion import (
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 limiter = Limiter(key_func=get_remote_address)
+
 # In-memory cache hit/miss counters
 # In production these would live in Redis so they persist across restarts
 _cache_hits = 0
@@ -80,24 +81,24 @@ def pagination_meta(total: int, limit: int, offset: int) -> dict:
 )
 @limiter.limit("30/minute")
 async def lookup_paper(request: Request, request_body: PaperLookupRequest):
-    """Look up a single paper by DOI or arXiv ID.
+    """Look up a single paper by DOI or arXiv ID. Checks three layers in
+    order before hitting external APIs:
+            (1) Redis cache: fastest, returns in under 1ms
+            (2) Postgres: fast, avoids external API call for known papers
+            (3) External APIs: CrossRef or arXiv fetched concurrently
 
-    Checks three layers in order before hitting external APIs:
-        (1) Redis cache: fastest, returns in under 1ms
-        (2) Postgres: fast, avoids external API call for known papers
-        (3) External APIs: CrossRef or arXiv fetched concurrently
-
-    On a successful fetch the paper is saved to Postgres and cached
-    in Redis. Rejected papers are cached but not saved to Postgres.
+    On a successful fetch the paper is saved to Postgres and cached in
+    Redis. Rejected papers are cached but not saved to Postgres.
 
     Args:
         request (PaperLookupRequest): Contains the identifier and type.
 
     Returns:
         PaperMetadata: Full normalized metadata if paper is found and
-            passes heliophysics validation.
+                            passes heliophysics validation.
         DomainValidationError: Rejection details if the paper is not
-            heliophysics-related or the identifier is not found.
+                                    heliophysics related or the identifier
+                                    is not found.
     """
     global _cache_hits, _cache_misses
 
@@ -114,7 +115,7 @@ async def lookup_paper(request: Request, request_body: PaperLookupRequest):
     stored = await get_paper(request_body.identifier)
     if stored:
         _cache_hits += 1
-        # Re-populate Redis so next request is even faster
+        # Repopulate Redis so next request is even faster
         await cache_paper(
             request_body.identifier, json.dumps(stored.model_dump(), default=str)
         )
@@ -148,18 +149,18 @@ async def lookup_paper(request: Request, request_body: PaperLookupRequest):
 )
 async def bulk_lookup(request: BulkLookupRequest):
     """Look up multiple papers concurrently by DOI or arXiv ID.
-
     All identifiers are fetched concurrently using asyncio.gather.
     Each result is independent, so one failed lookup does not affect
     others. Results are returned in the same order as the input.
 
     Args:
         request (BulkLookupRequest): Contains a list of identifiers
-            and their shared type. Maximum 50 identifiers per request.
+                                        and their shared type. Maximum
+                                        50 identifiers per request.
 
     Returns:
         list[PaperMetadata | DomainValidationError]: One result per
-            identifier in the same order as the input list.
+                        identifier in the same order as the input list.
     """
     import asyncio
 
@@ -171,7 +172,7 @@ async def bulk_lookup(request: BulkLookupRequest):
 
         Returns:
             PaperMetadata | DomainValidationError: The result for
-                this identifier.
+                                                    this identifier.
         """
         global _cache_hits, _cache_misses
 
@@ -240,7 +241,7 @@ async def list_all_papers(
 
     Returns:
         dict: Contains papers list, total count, limit, and offset
-            for the client to construct pagination.
+                    for the client to construct pagination.
     """
     # Whitelist allowed sort fields to prevent SQL injection
     allowed_sort_fields = {"fetched_at", "published_date", "citation_count", "title"}
@@ -279,25 +280,23 @@ async def search(
     offset: int = Query(default=0, ge=0),
 ):
     """Search stored papers by title and abstract using full text search.
-
-    Uses Postgres tsvector search with ts_rank relevance scoring.
-    Title matches rank higher than abstract matches. Results are
-    ordered by relevance score descending so best matches appear first.
-
-    Stemming is handled automatically; thus, searching 'wave' matches
-    'waves', 'wavelength', 'waving'. Searching 'magnetohydrodynamic'
-    matches 'magnetohydrodynamics'. This is significantly better than
-    a LIKE query for scientific text.
+    Uses Postgres tsvector search with ts_rank relevance scoring. Title
+    matches rank higher than abstract matches. Results are ordered by
+    relevance score descending so best matches appear first. Stemming is
+    handled automatically; thus, searching 'wave' matches 'waves',
+    'wavelength', etc. Searching 'magnetohydrodynamic' matches
+    'magnetohydrodynamics'. This is significantly better than a LIKE query
+    for scientific text.
 
     Args:
         q (str): Search terms. Minimum 2 characters. Multi-word queries
-            like 'solar wind' are handled automatically.
+                    like 'solar wind' are handled automatically.
         limit (int): Number of results to return. Between 1 and 100.
         offset (int): Number of results to skip for pagination.
 
     Returns:
         dict: Contains matching papers ordered by relevance, total
-            match count, the original query, limit, and offset.
+                    match count, the original query, limit, and offset.
 
     Example:
         GET /papers/search?q=solar+wind
@@ -327,7 +326,7 @@ async def search(
 async def filter_by_keywords(
     keywords: str = Query(
         ...,
-        description="Comma-separated keywords e.g. 'inertial modes,rossby waves,helioseismology'",
+        description="Comma separated keywords e.g. 'inertial modes,rossby waves,helioseismology'",
     ),
     match_all: bool = Query(
         default=False,
@@ -336,17 +335,15 @@ async def filter_by_keywords(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    """Filter stored papers by one or more explicit keywords.
-
-    Uses case-insensitive substring matching against title and abstract.
-    Unlike /search, there is no stemming or relevance ranking. It is also
-    case insensitive.
+    """Filter stored papers by one or more explicit keywords. Uses case insensitive
+    substring matching against title and abstract. Unlike /search, there is no
+    stemming or relevance ranking. It is also case insensitive.
 
     Args:
         keywords (str): Comma-separated list of keywords to filter by.
         match_all (bool): If True, only papers containing ALL keywords
-            are returned. If False, papers containing ANY keyword match.
-            Defaults to False.
+                            are returned. If False, papers containing
+                            ANY keyword match. Defaults to False.
         limit (int): Number of results to return. Between 1 and 100.
         offset (int): Number of results to skip for pagination.
 
@@ -382,18 +379,15 @@ async def filter_by_keywords(
     summary="Delete a paper from the collection",
 )
 async def remove_paper(identifier: str):
-    """Delete a single paper by its identifier.
-
-    Removes the paper from Postgres and invalidates its Redis cache
-    entry so stale data is not served after deletion. Returns 404 if
-    no paper with that identifier exists.
-
-    This endpoint is useful for removing papers that were ingested by
-    mistake, failed manual domain review, or are otherwise unwanted.
+    """Delete a single paper by its identifier. Removes the paper from
+    Postgres and invalidates its Redis cache entry so stale data is not
+    served after deletion. Returns 404 if no paper with that identifier
+    exists. This endpoint is useful for removing papers that were ingested
+    by mistake, failed manual domain review, or are otherwise unwanted.
 
     Args:
         identifier (str): The DOI, arXiv ID, or ADS bibcode to delete.
-            e.g. '2501.19169', '10.1007/s11207-021-01842-0'
+                            e.g. '2501.19169', '10.1007/s11207-021-01842-0'
 
     Returns:
         dict: Confirmation message and the deleted identifier.
@@ -425,20 +419,19 @@ async def remove_paper(identifier: str):
     summary="Partially update a stored paper",
 )
 async def update_paper(identifier: str, request: PaperPatchRequest):
-    """Partially update fields on a stored paper.
-
-    Only the fields provided in the request body are updated. All
-    other fields are left unchanged. Useful for manually correcting
-    a title, filling in a missing abstract, fixing a URL, or adding
-    a DOI that was missing at ingestion time.
-
-    After updating, the Redis cache entry is refreshed so subsequent
-    lookups return the corrected data immediately.
+    """Partially update fields on a stored paper. Only the fields
+    provided in the request body are updated. All other fields are
+    left unchanged. Useful for manually correcting a title, filling
+    in a missing abstract, fixing a URL, or adding a DOI that was
+    missing at ingestion time. After updating, the Redis cache entry
+    is refreshed so subsequent lookups return the corrected data
+    immediately.
 
     Args:
         identifier (str): The DOI, arXiv ID, or ADS bibcode to update.
         request (PaperPatchRequest): Fields to update. Only non-null
-            fields in the request body will be applied.
+                                        fields in the request body will
+                                        be applied.
 
     Returns:
         PaperMetadata: The full updated paper metadata.
@@ -482,13 +475,12 @@ async def update_paper(identifier: str, request: PaperPatchRequest):
 )
 async def collection_stats():
     """Return aggregate statistics about the stored paper collection.
-
-    Queries Postgres directly for counts and breakdowns. Useful for
-    README screenshots and demonstrating the API is actually being used.
+    Queries Postgres directly for counts and breakdowns. Useful for README
+    screenshots and demonstrating the API is actually being used.
 
     Returns:
         dict: Total papers, breakdown by source, breakdown by identifier
-            type, and timestamp of the most recently fetched paper.
+                    type, and timestamp of the most recently fetched paper.
     """
     return await get_stats()
 
@@ -521,25 +513,23 @@ async def get_metrics():
     summary="Collect latest heliophysics papers from arXiv",
 )
 async def ingest_from_arxiv(max_per_category: int = 25):
-    """Fetch and store the latest heliophysics papers from arXiv.
-
-    Searches all heliophysics arXiv categories concurrently, deduplicates
-    results, skips papers already stored, and fetches new ones with rate
-    limiting to respect arXiv's guidelines.
-
-    This endpoint can take several minutes to complete depending on how
-    many new papers are found. In production this would be triggered by
-    a scheduled job rather than a direct API call.
+    """Fetch and store the latest heliophysics papers from arXiv. Searches
+    all heliophysics arXiv categories concurrently, deduplicates results,
+    skips papers already stored, and fetches new ones with rate limiting
+    to respect arXiv's guidelines. This endpoint can take several minutes
+    to complete depending on how many new papers are found. In production,
+    this would be triggered by a scheduled job rather than a direct API call.
 
     Args:
-        max_per_category (int): Maximum papers to fetch per arXiv
-            category. Defaults to 25. Total will be at most
-            max_per_category * 3 categories minus duplicates.
+        max_per_category (int): Maximum papers to fetch per arXiv category.
+                                    Defaults to 25. Total will be at most
+                                    max_per_category * 3 categories minus
+                                    duplicates.
 
     Returns:
         dict: Ingestion summary including total found, newly ingested,
-            already stored, rejected, and failed counts plus the list
-            of newly ingested arXiv IDs.
+                already stored, rejected, and failed counts plus the list
+                of newly ingested arXiv IDs.
     """
     result = await ingest_latest_heliophysics(max_per_category=max_per_category)
     return {
@@ -557,15 +547,13 @@ async def ingest_from_arxiv(max_per_category: int = 25):
     summary="Collect a specific list of arXiv papers",
 )
 async def ingest_specific_ids(arxiv_ids: list[str]):
-    """Fetch and store a specific list of arXiv papers by ID.
-
-    Useful when you have a curated list of papers to add rather than
-    pulling the latest from arXiv categories. Skips papers already
-    in Postgres.
+    """Fetch and store a specific list of arXiv papers by ID. Useful
+    when you have a curated list of papers to add rather than pulling
+    the latest from arXiv categories. Skips papers already in Postgres.
 
     Args:
         arxiv_ids (list[str]): List of arXiv IDs to ingest.
-            e.g. ['2509.19847', '2301.04380']
+                                e.g. ['2509.19847', '2301.04380']
 
     Returns:
         dict: Ingestion summary with counts and newly ingested IDs.
@@ -592,11 +580,10 @@ async def ingest_date_range_endpoint(
     end_date: str = Query(..., description="End date in YYYYMMDD format e.g. 20250131"),
     max_per_category: int = Query(default=100),
 ):
-    """Ingest papers from arXiv submitted between two dates.
-
-    Useful for backfilling data. Run once per month to
-    build up a collection. Each run checks Postgres first so it is
-    safe to re-run; already stored papers are skipped.
+    """Ingest papers from arXiv submitted between two dates. Useful for
+    backfilling data. Run once per month to build up a collection.
+    Each run checks Postgres first so it is safe to rerun; already
+    stored papers are skipped.
 
     Args:
         start_date (str): Start date in YYYYMMDD format.
@@ -642,11 +629,10 @@ async def ingest_from_ads_endpoint(
         description="'keyword': filter by keywords. 'broad': sweep all core journals.",
     ),
 ):
-    """Ingest heliophysics papers from NASA ADS within a date range.
-
-    Searches ADS across core heliophysics journals for papers published
-    between the given dates. ADS is preferred over arXiv for published
-    papers because it has explicit journal coverage and richer metadata.
+    """Ingest heliophysics papers from NASA ADS within a date range. Searches
+    ADS across core heliophysics journals for papers published between the
+    given dates. ADS is preferred over arXiv for published papers because
+    it has explicit journal coverage and richer metadata.
 
     Args:
         start_date (str): Start date in YYYY-MM format. e.g. '2025-01'
@@ -691,9 +677,8 @@ async def ingest_from_ads_endpoint(
 async def extract_paper(identifier: str):
     """Extract structured information from a paper's abstract using Claude.
     Checks if an extraction already exists in Postgres and returns it
-    immediately if so. Claude is never called twice for the same paper.
-    If no extraction exists, sends the abstract to Claude and caches
-    the result.
+    immediately if so. Claude is never called twice for the same paper. If
+    no extraction exists, sends the abstract to Claude and caches the result.
 
     Args:
         identifier (str): ADS bibcode or arXiv ID of the paper.
@@ -712,13 +697,14 @@ async def extract_paper(identifier: str):
         404: If the paper is not found in the database.
         400: If the paper has no abstract to extract from.
     """
+    from fastapi import HTTPException
+
     from app.services.database import get_paper
     from app.services.extraction import (
         extract_abstract,
         get_extraction,
         save_extraction,
     )
-    from fastapi import HTTPException
 
     # Look up paper in Postgres
     paper = await get_paper(identifier)
@@ -738,49 +724,53 @@ async def extract_paper(identifier: str):
         )
 
     # Call Claude
-    result, raw_response = await extract_abstract(identifier, paper.title, paper.abstract)
+    result, raw_response = await extract_abstract(
+        identifier, paper.title, paper.abstract
+    )
 
     # Cache result in Postgres
     await save_extraction(identifier, result, raw_response)
 
     return {
-            "identifier": identifier,
-            "central_contribution": result.get("central_contribution"),
-            "relevance_to_solar_inertial_modes": result.get("relevance_to_solar_inertial_modes"),
-            "data_type": result.get("data_type"),
-            "methods": result.get("methods"),
-            "key_findings": result.get("key_findings"),
-            "instruments": result.get("instruments"),
-            "wave_types": result.get("wave_types"),
-            "solar_region": result.get("solar_region"),
-            "azimuthal_orders": result.get("azimuthal_orders"),
-            "physical_parameters": result.get("physical_parameters"),
-            "measured_quantities": result.get("measured_quantities"),
-            "constrained_quantities": result.get("constrained_quantities"),
-            "theoretical_framework": result.get("theoretical_framework"),
-            "detection_method": result.get("detection_method"),
-            "observational_technique": result.get("observational_technique"),
-            "depth_range": result.get("depth_range"),
-            "radial_order": result.get("radial_order"),
-            "dispersion_relation_discussed": result.get("dispersion_relation_discussed"),
-            "eigenfunction_computed": result.get("eigenfunction_computed"),
-            "mode_identification_method": result.get("mode_identification_method"),
-            "numerical_values": result.get("numerical_values"),
-            "solar_cycle_phase": result.get("solar_cycle_phase"),
-            "cycle_dependence": result.get("cycle_dependence"),
-            "solar_activity_level": result.get("solar_activity_level"),
-            "magnetic_field_considered": result.get("magnetic_field_considered"),
-            "time_period": result.get("time_period"),
-            "agrees_with_theory": result.get("agrees_with_theory"),
-            "theoretical_prediction_tested": result.get("theoretical_prediction_tested"),
-            "confirms_previous_work": result.get("confirms_previous_work"),
-            "contradicts_previous_work": result.get("contradicts_previous_work"),
-            "open_questions": result.get("open_questions"),
-            "researcher_summary": result.get("researcher_summary"),
-            "extraction_notes": result.get("extraction_notes"),
-            "extracted_at": datetime.now(timezone.utc).isoformat(),
-            "cached": False,
-        }
+        "identifier": identifier,
+        "central_contribution": result.get("central_contribution"),
+        "relevance_to_solar_inertial_modes": result.get(
+            "relevance_to_solar_inertial_modes"
+        ),
+        "data_type": result.get("data_type"),
+        "methods": result.get("methods"),
+        "key_findings": result.get("key_findings"),
+        "instruments": result.get("instruments"),
+        "wave_types": result.get("wave_types"),
+        "solar_region": result.get("solar_region"),
+        "azimuthal_orders": result.get("azimuthal_orders"),
+        "physical_parameters": result.get("physical_parameters"),
+        "measured_quantities": result.get("measured_quantities"),
+        "constrained_quantities": result.get("constrained_quantities"),
+        "theoretical_framework": result.get("theoretical_framework"),
+        "detection_method": result.get("detection_method"),
+        "observational_technique": result.get("observational_technique"),
+        "depth_range": result.get("depth_range"),
+        "radial_order": result.get("radial_order"),
+        "dispersion_relation_discussed": result.get("dispersion_relation_discussed"),
+        "eigenfunction_computed": result.get("eigenfunction_computed"),
+        "mode_identification_method": result.get("mode_identification_method"),
+        "numerical_values": result.get("numerical_values"),
+        "solar_cycle_phase": result.get("solar_cycle_phase"),
+        "cycle_dependence": result.get("cycle_dependence"),
+        "solar_activity_level": result.get("solar_activity_level"),
+        "magnetic_field_considered": result.get("magnetic_field_considered"),
+        "time_period": result.get("time_period"),
+        "agrees_with_theory": result.get("agrees_with_theory"),
+        "theoretical_prediction_tested": result.get("theoretical_prediction_tested"),
+        "confirms_previous_work": result.get("confirms_previous_work"),
+        "contradicts_previous_work": result.get("contradicts_previous_work"),
+        "open_questions": result.get("open_questions"),
+        "researcher_summary": result.get("researcher_summary"),
+        "extraction_notes": result.get("extraction_notes"),
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "cached": False,
+    }
 
 
 @router.get(

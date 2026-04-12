@@ -19,7 +19,7 @@ import httpx
 
 from keywords import DEFAULT_KEYWORDS
 
-BASE_URL = "http://localhost:8000/papers"
+base_url = "http://localhost:8000/papers"
 
 
 def today_ads() -> str:
@@ -67,10 +67,9 @@ def print_result(result: dict, source: str) -> None:
 
 
 def ingest_arxiv(max_per_category: int) -> None:
-    """Fetch the latest heliophysics papers from arXiv.
-
-    Hits POST /papers/ingest/arxiv. Pulls from all heliophysics
-    arXiv categories up to max_per_category papers each.
+    """Fetch the latest heliophysics papers from arXiv. Hits
+    POST /papers/ingest/arxiv. Pulls from all heliophysics arXiv
+    categories up to max_per_category papers each.
 
     Args:
         max_per_category (int): Maximum papers to fetch per category.
@@ -80,7 +79,7 @@ def ingest_arxiv(max_per_category: int) -> None:
     )
     with httpx.Client(timeout=120) as client:
         r = client.post(
-            f"{BASE_URL}/ingest/arxiv",
+            f"{base_url}/ingest/arxiv",
             params={"max_per_category": max_per_category},
         )
         r.raise_for_status()
@@ -88,11 +87,10 @@ def ingest_arxiv(max_per_category: int) -> None:
 
 
 def ingest_daterange(start: str, end: str, max_per_category: int) -> None:
-    """Fetch arXiv papers submitted within a specific date range.
-
-    Hits POST /papers/ingest/daterange. Useful for backfilling months
-    of papers you haven't ingested yet. Safe to re-run as already stored
-    papers are skipped automatically.
+    """Fetch arXiv papers submitted within a specific date range. Hits
+    POST /papers/ingest/daterange. Useful for backfilling months of papers
+    you haven't ingested yet. Safe to re-run as already stored papers are
+    skipped automatically.
 
     Args:
         start (str): Start date in YYYYMMDD format e.g. '20250101'.
@@ -102,7 +100,7 @@ def ingest_daterange(start: str, end: str, max_per_category: int) -> None:
     print(f"\nFetching arXiv papers from {start} to {end}...")
     with httpx.Client(timeout=300) as client:
         r = client.post(
-            f"{BASE_URL}/ingest/daterange",
+            f"{base_url}/ingest/daterange",
             params={
                 "start_date": start,
                 "end_date": end,
@@ -116,11 +114,10 @@ def ingest_daterange(start: str, end: str, max_per_category: int) -> None:
 def ingest_ads(
     start: str, end: str, keywords: str, max_results: int, mode: str = "keyword"
 ) -> None:
-    """Fetch heliophysics papers from NASA ADS within a date range.
-
-    Hits POST /papers/ingest/ads. ADS is preferred over arXiv for
-    published papers because it has explicit journal coverage and
-    richer metadata including citation counts.
+    """Fetch heliophysics papers from NASA ADS within a date range. Hits
+    POST /papers/ingest/ads. ADS is preferred over arXiv for published papers
+    because it has explicit journal coverage and richer metadata including
+    citation counts.
 
     Args:
         start (str): Start date in YYYY-MM format e.g. '2025-01'.
@@ -134,13 +131,13 @@ def ingest_ads(
         print(
             f"\nFetching ALL solar physics papers from ADS journals ({start} to {end})..."
         )
-        print("Mode: broad (no keyword filter — sweeping ApJ, A&A, SoPh, JGRA, etc.)\n")
+        print("Mode: broad (no keyword filter: sweeping ApJ, A&A, SoPh, JGRA, etc.)\n")
     else:
         print(f"\nFetching ADS papers from {start} to {end}...")
         print(f"Keywords: {keywords}\n")
     with httpx.Client(timeout=300) as client:
         r = client.post(
-            f"{BASE_URL}/ingest/ads",
+            f"{base_url}/ingest/ads",
             params={
                 "start_date": start,
                 "end_date": end,
@@ -154,11 +151,9 @@ def ingest_ads(
 
 
 def run_interactive() -> None:
-    """Walk the user through ingestion choices interactively.
-
-    Prompts for source, date range, max results, and keywords.
-    All prompts show a default in brackets. Pressing Enter to
-    accept it.
+    """Walk the user through ingestion choices interactively. Prompts
+    for source, date range, max results, and keywords. All prompts show
+    a default in brackets. Pressing Enter to accept it.
     """
     print("\n══ Heliophysics Paper Ingester ══════════════════════")
     print("  Sources: arxiv | daterange | ads")
@@ -232,12 +227,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Max results (ADS) or max per category (arXiv). Default 100.",
     )
-    
+
     parser.add_argument(
-    "--keywords",
-    help="Comma-separated keywords for ADS. Defaults to keywords.py.",
+        "--keywords",
+        help="Comma-separated keywords for ADS. Defaults to keywords.py.",
     )
-    
+
     parser.add_argument(
         "--mode",
         choices=["keyword", "broad"],

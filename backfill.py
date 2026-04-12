@@ -21,10 +21,10 @@ from datetime import datetime, timezone
 
 import httpx
 
-BASE_URL = "http://localhost:8000/papers"
+base_url = "http://localhost:8000/papers"
 
 # Citation counts older than this many days are considered stale
-CITATION_STALE_DAYS = 30
+citation_stale_days = 30
 
 
 def prompt(question: str, default: str) -> str:
@@ -43,9 +43,8 @@ def prompt(question: str, default: str) -> str:
 
 def fetch_all_papers(client: httpx.Client) -> list[dict]:
     """Retrieve every paper stored in Postgres via paginated list endpoint.
-
-    Walks through all pages using limit/offset until no more papers
-    are returned.
+    Walks through all pages using limit/offset until no more papers are
+    returned.
 
     Args:
         client (httpx.Client): The shared HTTP client.
@@ -58,7 +57,7 @@ def fetch_all_papers(client: httpx.Client) -> list[dict]:
     limit = 100
 
     while True:
-        r = client.get(f"{BASE_URL}/", params={"limit": limit, "offset": offset})
+        r = client.get(f"{base_url}/", params={"limit": limit, "offset": offset})
         r.raise_for_status()
         data = r.json()
         batch = data["papers"]
@@ -72,15 +71,15 @@ def fetch_all_papers(client: httpx.Client) -> list[dict]:
 
 def fix_url(paper: dict) -> str | None:
     """Derive a URL from known identifiers if the url field is missing.
-
-    Constructs the URL locally without hitting any external API.
-    arXiv and DOI URLs follow predictable patterns.
+    Constructs the URL locally without hitting any external API. arXiv
+    and DOI URLs follow predictable patterns.
 
     Args:
         paper (dict): The raw paper dict from the API.
 
     Returns:
-        str | None: The derived URL, or None if neither identifier is available.
+        str | None: The derived URL, or None if neither identifier is
+                        available.
     """
     if paper.get("arxiv_id"):
         return f"https://arxiv.org/abs/{paper['arxiv_id']}"
@@ -92,7 +91,7 @@ def fix_url(paper: dict) -> str | None:
 
 
 def is_citation_stale(paper: dict) -> bool:
-    """Check whether a paper's citation count is old enough to re-fetch.
+    """Check whether a paper's citation count is old enough to refetch.
 
     Args:
         paper (dict): The raw paper dict from the API.
@@ -105,15 +104,14 @@ def is_citation_stale(paper: dict) -> bool:
         return True
     fetched = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
     age_days = (datetime.now(timezone.utc) - fetched).days
-    return age_days >= CITATION_STALE_DAYS
+    return age_days >= citation_stale_days
 
 
 def fetch_citation_count_from_ads(client: httpx.Client, paper: dict) -> int | None:
-    """Try to get a citation count from NASA ADS as a fallback.
-
-    Uses the paper's arxiv_id or doi to search ADS for a citation count
-    when Semantic Scholar returns nothing. ADS indexes most published
-    heliophysics papers and usually has citation data even for recent ones.
+    """Try to get a citation count from NASA ADS as a fallback. Uses the paper's
+    arxiv_id or doi to search ADS for a citation count when Semantic Scholar
+    returns nothing. ADS indexes most published heliophysics papers and usually
+    has citation data even for recent ones.
 
     Args:
         client (httpx.Client): The shared HTTP client.
@@ -122,8 +120,9 @@ def fetch_citation_count_from_ads(client: httpx.Client, paper: dict) -> int | No
     Returns:
         int | None: The citation count if found, None otherwise.
     """
-    from app.config import settings
     import urllib.parse
+
+    from app.config import settings
 
     arxiv_id = paper.get("arxiv_id")
     doi = paper.get("doi")
@@ -163,7 +162,7 @@ def fetch_citation_count_from_ads(client: httpx.Client, paper: dict) -> int | No
 def patch_paper(
     client: httpx.Client, identifier: str, identifier_type: str, dry_run: bool
 ) -> dict | None:
-    """Re-fetch a single paper via the lookup endpoint to get fresh data.
+    """Refetch a single paper via the lookup endpoint to get fresh data.
 
     Args:
         client (httpx.Client): The shared HTTP client.
@@ -177,7 +176,7 @@ def patch_paper(
     if dry_run:
         return None
     r = client.post(
-        f"{BASE_URL}/lookup",
+        f"{base_url}/lookup",
         json={"identifier": identifier, "identifier_type": identifier_type},
         timeout=30,
     )
@@ -206,10 +205,9 @@ def print_summary(
 
 
 def backfill_urls(papers: list[dict], dry_run: bool) -> None:
-    """Fix papers that are missing a URL field.
-
-    For arXiv and DOI papers the URL can be derived locally without
-    an external API call. ADS papers get a link to their ADS abstract page.
+    """Fix papers that are missing a URL field. For arXiv and DOI papers
+    the URL can be derived locally without an external API call. ADS papers
+    get a link to their ADS abstract page.
 
     Args:
         papers (list[dict]): All stored papers.
@@ -219,18 +217,18 @@ def backfill_urls(papers: list[dict], dry_run: bool) -> None:
     skipped = len(papers) - len(missing)
     fixed = 0
 
-    print(f"\nChecking URLs — {len(missing)} missing out of {len(papers)} papers...")
+    print(f"\nChecking URLs...{len(missing)} missing out of {len(papers)} papers...")
 
     for paper in missing:
         url = fix_url(paper)
         if url:
             if not dry_run:
-                print(f"  ✓ {paper['identifier']} → {url}")
+                print(f"  {paper['identifier']} → {url}")
             else:
                 print(f"  [dry run] would fix: {paper['identifier']} → {url}")
             fixed += 1
         else:
-            print(f"  ✗ {paper['identifier']} — cannot derive URL, no arxiv_id or doi")
+            print(f"  {paper['identifier']}...cannot derive URL, no arxiv_id or doi")
 
     print_summary("URLs", len(papers), fixed, skipped, dry_run)
 
@@ -238,11 +236,10 @@ def backfill_urls(papers: list[dict], dry_run: bool) -> None:
 def backfill_missing_ids(
     papers: list[dict], client: httpx.Client, dry_run: bool
 ) -> None:
-    """Re-fetch papers that are missing arxiv_id or doi.
-
-    These fields are sometimes absent when a paper is ingested from a
-    source that doesn't cross-reference other databases. Re-fetching
-    via the lookup endpoint triggers the full enrichment pipeline.
+    """Refetch papers that are missing arxiv_id or doi. These fields are
+    sometimes absent when a paper is ingested from a source that doesn't
+    cross-reference other databases. Refetching via the lookup endpoint
+    triggers the full enrichment pipeline.
 
     Args:
         papers (list[dict]): All stored papers.
@@ -254,7 +251,7 @@ def backfill_missing_ids(
     fixed = 0
 
     print(
-        f"\nChecking missing IDs — {len(missing)} incomplete out of {len(papers)} papers..."
+        f"\nChecking missing IDs...{len(missing)} incomplete out of {len(papers)} papers..."
     )
 
     for paper in missing:
@@ -264,7 +261,7 @@ def backfill_missing_ids(
         if not paper.get("doi"):
             missing_fields.append("doi")
 
-        print(f"  {paper['identifier']} — missing: {', '.join(missing_fields)}")
+        print(f"  {paper['identifier']}...missing: {', '.join(missing_fields)}")
 
         result = patch_paper(
             client, paper["identifier"], paper["identifier_type"], dry_run
@@ -273,14 +270,13 @@ def backfill_missing_ids(
             print("Updated")
             fixed += 1
         elif not dry_run:
-            print("Still missing after re-fetch (source may not provide these)")
+            print("Still missing after refetch (source may not provide these)")
 
     print_summary("Missing IDs", len(papers), fixed, skipped, dry_run)
 
 
 def backfill_citations(papers: list[dict], client: httpx.Client, dry_run: bool) -> None:
-    """Re-fetch citation counts for papers with missing or stale counts.
-
+    """Refetch citation counts for papers with missing or stale counts.
     Tries Semantic Scholar first via the lookup endpoint. If that returns
     nothing, falls back to NASA ADS which has citation data for most
     published heliophysics papers.
@@ -297,12 +293,12 @@ def backfill_citations(papers: list[dict], client: httpx.Client, dry_run: bool) 
     fixed = 0
 
     print(
-        f"\nChecking citations — {len(stale)} stale or missing out of {len(papers)} papers..."
+        f"\nChecking citations...{len(stale)} stale or missing out of {len(papers)} papers..."
     )
 
     for paper in stale:
         current = paper.get("citation_count")
-        print(f"  {paper['identifier']} — current count: {current}")
+        print(f"  {paper['identifier']}...current count: {current}")
 
         if dry_run:
             ads_count = fetch_citation_count_from_ads(client, paper)
@@ -346,7 +342,7 @@ def run_interactive(client: httpx.Client) -> None:
     dry_run = prompt("Dry run? (yes/no)", "no").lower().startswith("y")
 
     if dry_run:
-        print("\n  Dry run enabled — no changes will be made.\n")
+        print("\n  Dry run enabled...no changes will be made.\n")
 
     papers = fetch_all_papers(client)
     print(f"  Found {len(papers)} papers in collection.")
@@ -397,7 +393,7 @@ def run_cli(args: argparse.Namespace, client: httpx.Client) -> None:
         client (httpx.Client): The shared HTTP client.
     """
     if args.dry_run:
-        print("\n  Dry run enabled — no changes will be made.\n")
+        print("\n  Dry run enabled...no changes will be made.\n")
 
     papers = fetch_all_papers(client)
     print(f"  Found {len(papers)} papers in collection.")

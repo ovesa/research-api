@@ -3,7 +3,7 @@
 # Already-extracted papers are returned from cache instantly.
 # New extractions call Claude and are cached in Postgres.
 #
-#Usage:
+# Usage:
 #    python extract_all.py
 #    python extract_all.py --limit 50
 
@@ -11,7 +11,7 @@ import argparse
 import time
 import httpx
 
-BASE_URL = "http://localhost:8000"
+base_url = "http://localhost:8000"
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
 
     # Fetch all papers
     print("\n Fetching papers from database...")
-    r = httpx.get(f"{BASE_URL}/papers/", params={"limit": args.limit}, timeout=30)
+    r = httpx.get(f"{base_url}/papers/", params={"limit": args.limit}, timeout=30)
     r.raise_for_status()
     papers = r.json().get("papers", [])
     print(f"   Found {len(papers)} papers\n")
@@ -48,7 +48,7 @@ def main():
 
         try:
             res = httpx.post(
-                f"{BASE_URL}/papers/{identifier}/extract",
+                f"{base_url}/papers/{identifier}/extract",
                 timeout=60,
             )
             res.raise_for_status()

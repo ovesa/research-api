@@ -1,10 +1,11 @@
-from pydantic import BaseModel, field_validator, model_validator, ConfigDict
-from typing import Optional
 from datetime import datetime
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 # arXiv categories relevant to heliophysics
-HELIOPHYSICS_ARXIV_CATEGORIES = {
+heliophysics_arxiv_categories = {
     "astro-ph.SR",  # Solar and Stellar Astrophysics
     "physics.space-ph",  # Space Physics
 }
@@ -12,7 +13,7 @@ HELIOPHYSICS_ARXIV_CATEGORIES = {
 # ADS bibstems for journals that publish solar/heliophysics research.
 # Used in broad-mode ingestion to sweep all papers from these journals
 # without keyword filtering. Bibstems are the ADS short journal codes.
-SOLAR_PHYSICS_JOURNAL_BIBSTEMS = {
+solar_physics_journal_bibstems = {
     "ApJ",  # The Astrophysical Journal
     "ApJL",  # The Astrophysical Journal Letters
     "ApJS",  # The Astrophysical Journal Supplement Series
@@ -28,7 +29,7 @@ SOLAR_PHYSICS_JOURNAL_BIBSTEMS = {
 }
 
 # Journals that publish heliophysics research
-HELIOPHYSICS_JOURNALS = {
+heliophysics_journals = {
     "the astrophysical journal",
     "the astrophysical journal letters",
     "the astrophysical journal supplement series",
@@ -45,7 +46,7 @@ HELIOPHYSICS_JOURNALS = {
 # Keywords that must appear in title or abstract for DOI lookups
 # where journal matching alone is insufficient
 # keywords I am particularly interested in
-HELIOPHYSICS_KEYWORDS = {
+heliophysics_keywords = {
     "solar wind",
     "solar flare",
     "coronal mass ejection",
@@ -68,7 +69,6 @@ HELIOPHYSICS_KEYWORDS = {
     "solar physics",
     "solar interior",
     "helioseismology",
-    "SDO/HMI",
     "HMI",
     "DKIST",
     "solar dynamo",
@@ -82,23 +82,25 @@ HELIOPHYSICS_KEYWORDS = {
     "power spectrum",
     "doppler velocity",
     "eigenfrequency",
+    "shallow water",
+    "magneto-Rossby waves",
 }
 
 # ADS bibcode patterns for conference abstracts to skip
 # confE = oral presentations, confP = poster abstracts
 # Distinguished from proceedings *papers* which have volume/page numbers
-EXCLUDED_BIBCODE_PATTERNS = {
+excluded_bibcode_patterns = {
     "confE",  # conference oral abstract
     "confP",  # conference poster abstract
-    "DPS",      # Division for Planetary Sciences
-    "AGUFM",    # AGU Fall Meeting
-    "AAS",      # American Astronomical Society meeting
+    "DPS",  # Division for Planetary Sciences
+    "AGUFM",  # AGU Fall Meeting
+    "AAS",  # American Astronomical Society meeting
 }
 
 
 def is_conference_abstract(bibcode: str) -> bool:
     """Return True if this bibcode is a conference abstract, not a paper."""
-    return any(pattern in bibcode for pattern in EXCLUDED_BIBCODE_PATTERNS)
+    return any(pattern in bibcode for pattern in excluded_bibcode_patterns)
 
 
 class IdentifierType(str, Enum):
@@ -115,20 +117,19 @@ class IdentifierType(str, Enum):
     ads = "ads"
 
 
-
 class Author(BaseModel):
-    """Represents a single author on a paper.
-
-    All fields except name are optional because external APIs are
-    inconsistent. CrossRef sometimes returns only a name string while
-    Semantic Scholar returns full affiliations. We normalize what we can.
+    """Represents a single author on a paper. All fields except name
+    are optional because external APIs are inconsistent. CrossRef
+    sometimes returns only a name string while Semantic Scholar
+    returns full affiliations. We normalize what we can.
 
     Attributes:
         name (str): Full name of the author.
         affiliation (str | None): Institution or organization. Not always
-            returned by external APIs.
+                                    returned by external APIs.
         orcid (str | None): ORCID identifier if available. Uniquely
-            identifies a researcher across institutions.
+                                    identifies a researcher across
+                                    institutions.
     """
 
     name: str
@@ -141,13 +142,13 @@ class Author(BaseModel):
         kwargs.setdefault("exclude_none", True)
         return super().model_dump(**kwargs)
 
+
 class PaperMetadata(BaseModel):
     """Normalized metadata structure returned for every heliophysics paper.
-
-    This is the core output schema of the API. Data is pulled from one
-    or more external sources and normalized into this consistent shape
-    regardless of which source provided it. Only papers validated as
-    heliophysics-relevant are stored and returned.
+    This is the core output schema of the API. Data is pulled from one or
+    more external sources and normalized into this consistent shape regardless
+    of which source provided it. Only papers validated as heliophysics relevant
+    are stored and returned.
 
     Attributes:
         identifier (str): The DOI or arXiv ID used to look up this paper.
@@ -155,22 +156,25 @@ class PaperMetadata(BaseModel):
         title (str): Full paper title.
         authors (list[Author]): Ordered list of authors.
         abstract (str | None): Full abstract text. Nullable because CrossRef
-            frequently omits abstracts even for published papers.
+                                    frequently omits abstracts even for published
+                                    papers.
         published_date (str | None): Publication date as a string. Format
-            varies by source so stored normalized rather than as a datetime.
+                                        varies by source so stored normalized
+                                        rather than as a datetime.
         journal (str | None): Journal or conference name if available.
         doi (str | None): DOI if known, even if lookup was via arXiv ID.
         arxiv_id (str | None): arXiv ID if known, even if lookup was via DOI.
         citation_count (int | None): From Semantic Scholar. Nullable because
-            it is not always available especially for preprints.
+                                        it is not always available especially
+                                        for preprints.
         source (str): Which external API provided the primary data.
         fetched_at (datetime): When this record was retrieved from the source.
         is_heliophysics (bool): Whether this paper passed heliophysics
-            domain validation. Always True for stored papers — included
-            for transparency in the response.
+                                    domain validation. Always True for
+                                    stored papers.
         url (str | None): Direct link to the paper's abstract page.
-            For arXiv papers: https://arxiv.org/abs/{arxiv_id}.
-            For DOI papers: https://doi.org/{doi}.
+                            For arXiv papers: https://arxiv.org/abs/{arxiv_id}.
+                            For DOI papers: https://doi.org/{doi}.
     """
 
     identifier: str
@@ -226,7 +230,6 @@ class PaperLookupRequest(BaseModel):
     @model_validator(mode="after")
     def validate_identifier_format(self) -> "PaperLookupRequest":
         """Validate identifier format matches its declared type.
-
         Checks the identifier against a regex pattern for its type.
         Rejects obviously malformed identifiers before hitting any
         external API, saving latency and avoiding unnecessary calls.
@@ -236,7 +239,7 @@ class PaperLookupRequest(BaseModel):
 
         Raises:
             ValueError: If the identifier does not match the expected
-                format for its declared type.
+                            format for its declared type.
         """
         import re
 
@@ -258,15 +261,14 @@ class PaperLookupRequest(BaseModel):
 
 class BulkLookupRequest(BaseModel):
     """Request body for looking up multiple heliophysics papers in one call.
-
-    All identifiers in a single bulk request must be the same type.
-    Mixed DOI and arXiv batches should be sent as separate requests.
+    All identifiers in a single bulk request must be the same type. Mixed DOI
+    and arXiv batches should be sent as separate requests.
 
     Attributes:
         identifiers (list[str]): List of DOIs or arXiv IDs. Capped at 50
-            to prevent runaway external API usage.
+                                    to prevent runaway external API usage.
         identifier_type (IdentifierType): The type that applies to all
-            identifiers in the list.
+                                            identifiers in the list.
     """
 
     identifiers: list[str]
@@ -276,7 +278,6 @@ class BulkLookupRequest(BaseModel):
     @classmethod
     def validate_identifiers(cls, v: list[str]) -> list[str]:
         """Enforce list size limits and strip whitespace from each identifier.
-
         Capping at 50 is a practical limit. Each identifier may trigger up
         to 3 concurrent external API calls. 50 identifiers means up to 150
         outbound requests per bulk submission which is already aggressive.
@@ -318,7 +319,8 @@ class DomainValidationError(BaseModel):
         identifier (str): The identifier that was looked up.
         reason (str): Human readable explanation of why it was rejected.
         title (str | None): The paper title if it was retrievable before
-            rejection. Helps the user confirm they submitted the right paper.
+                                rejection. Helps the user confirm they
+                                submitted the right paper.
     """
 
     identifier: str
@@ -327,11 +329,10 @@ class DomainValidationError(BaseModel):
 
 
 class PaperPatchRequest(BaseModel):
-    """Request body for partially updating a stored paper.
-
-    All fields are optional. Only the fields provided will be updated.
-    System-managed fields (identifier, identifier_type, source,
-    fetched_at, is_heliophysics) cannot be changed via this endpoint.
+    """Request body for partially updating a stored paper. All fields are
+    optional. Only the fields provided will be updated. System managed
+    fields (e.g., identifier, identifier_type, source, fetched_at,
+    is_heliophysics) cannot be changed via this endpoint.
 
     Attributes:
         title (str | None): Corrected paper title.

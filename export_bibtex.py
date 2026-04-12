@@ -2,7 +2,7 @@
 # Fetches official BibTeX entries directly from NASA ADS for accuracy.
 # Falls back to generated entries if ADS is unavailable.
 #
-#Usage:
+# Usage:
 #
 # Export everything
 #    python export_bibtex.py --output refs.bib
@@ -33,8 +33,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ADS_TOKEN = os.getenv("ADS_API_TOKEN", "")
-DATABASE_URL = os.getenv(
+ADS_token = os.getenv("ADS_API_TOKEN", "")
+database_url = os.getenv(
     "DATABASE_URL",
     "postgresql://researchapi:researchapi@localhost:5432/researchapi",
 )
@@ -43,10 +43,11 @@ DATABASE_URL = os.getenv(
 ##################### Database #####################
 ####################################################
 
+
 def _get_connection():
     """Connect to Postgres."""
     return psycopg2.connect(
-        DATABASE_URL,
+        database_url,
         cursor_factory=psycopg2.extras.RealDictCursor,
     )
 
@@ -58,9 +59,9 @@ def _fetch_papers(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> list[dict]:
-    """Fetch papers from Postgres with optional filters.
-    Joins with extractions table so relevance filter works even
-    if not all papers have been extracted yet.
+    """Fetch papers from Postgres with optional filters. Joins with
+    extractions table so relevance filter works even if not all papers
+    have been extracted yet.
 
     Args:
         conn: Postgres connection.
@@ -122,15 +123,17 @@ def _fetch_papers(
         cur.execute(query, params)
         return cur.fetchall()
 
+
 ####################################################
 ################# ADS BibTeX fetch #################
 ####################################################
 
+
 def _fetch_bibtex_from_ads(bibcode: str) -> str | None:
-    """Fetch official BibTeX entry from NASA ADS. Uses the 
-    ADS export API which returns the same BibTeX you see on 
+    """Fetch official BibTeX entry from NASA ADS. Uses the
+    ADS export API which returns the same BibTeX you see on
     the ADS abstract page. This is the gold standard format,
-    which has correct journal abbreviations, volume, page 
+    which has correct journal abbreviations, volume, page
     numbers, and all metadata exactly as ADS has it.
 
     Args:
@@ -139,7 +142,7 @@ def _fetch_bibtex_from_ads(bibcode: str) -> str | None:
     Returns:
         str | None: Raw BibTeX string, or None if fetch failed.
     """
-    if not ADS_TOKEN:
+    if not ADS_token:
         return None
 
     url = f"https://api.adsabs.harvard.edu/v1/export/bibtex/{bibcode}"
@@ -147,7 +150,7 @@ def _fetch_bibtex_from_ads(bibcode: str) -> str | None:
         response = httpx.get(
             url,
             headers={
-                "Authorization": f"Bearer {ADS_TOKEN}",
+                "Authorization": f"Bearer {ADS_token}",
                 "User-Agent": "research-api/0.1 (heliophysics paper lookup)",
             },
             timeout=15,
@@ -166,9 +169,11 @@ def _fetch_bibtex_from_ads(bibcode: str) -> str | None:
         print(f"  WARNING: Failed to fetch BibTeX for {bibcode}: {e}")
         return None
 
+
 ####################################################
 ############# Fallback BibTeX generator ############
 ####################################################
+
 
 def _make_cite_key(paper: dict) -> str:
     """Generate a citation key from bibcode and first author.
@@ -232,8 +237,8 @@ def _format_authors(authors: list) -> str:
 
 
 def _generate_bibtex_entry(paper: dict) -> str:
-    """Generate a BibTeX entry from paper metadata.
-    Used as fallback when ADS fetch fails.
+    """Generate a BibTeX entry from paper metadata. Used as
+    fallback when ADS fetch fails.
 
     Args:
         paper (dict): Paper row from Postgres.
@@ -275,9 +280,11 @@ def _generate_bibtex_entry(paper: dict) -> str:
     lines.append("}")
     return "\n".join(lines)
 
+
 ####################################################
 ######################## CLI #######################
 ####################################################
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -331,7 +338,7 @@ def main():
     if args.end:
         print(f"  To         : {args.end}")
     print(f"  Output     : {args.output}")
-    if not ADS_TOKEN:
+    if not ADS_token:
         print("  WARNING    : ADS_API_TOKEN not set; will use generated entries")
     print()
 

@@ -1,6 +1,6 @@
 # Research agent router.
 # Provides a single endpoint POST /agent/query that accepts a plain-English
-#research question, chains intent parsing → paper search → extraction →
+# research question, chains intent parsing → paper search → extraction →
 # synthesis, and returns a detailed literature synthesis with paper citations.
 
 import json
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 #########################################
 ####### Request / Response models #######
 #########################################
+
 
 class AgentQuery(BaseModel):
     """Incoming research question from the user."""
@@ -53,9 +54,11 @@ class AgentResponse(BaseModel):
     paper_count: int
     timestamp: str
 
+
 #########################################
 ########## Anthropic API helper #########
 #########################################
+
 
 def _get_api_key() -> str:
     from app.config import settings
@@ -91,9 +94,11 @@ async def _call_claude(prompt: str, max_tokens: int = 2000) -> str:
     data = response.json()
     return data["content"][0]["text"].strip()
 
+
 #########################################
 ########## Step 1: Parse intent #########
 #########################################
+
 
 async def _parse_intent(question: str) -> dict:
     """Use Claude to extract search parameters from a plain-English question.
@@ -133,9 +138,11 @@ Return only the JSON object. No explanation."""
         clean = raw.replace("```json", "").replace("```", "").strip()
         return json.loads(clean)
 
+
 #########################################
 ########## Step 2: Search papers ########
 #########################################
+
 
 async def _search_papers(params: dict) -> list[dict]:
     """Search the papers database using extracted intent params.
@@ -222,9 +229,11 @@ async def _search_papers(params: dict) -> list[dict]:
 
     return [dict(row) for row in rows]
 
+
 #########################################
 ### Step 3: Ensure extractions exist ####
 #########################################
+
 
 async def _ensure_extractions(papers: list[dict]) -> list[dict]:
     """For any paper without an extraction, call Claude to extract it.
@@ -271,6 +280,7 @@ async def _ensure_extractions(papers: list[dict]) -> list[dict]:
         enriched.append(paper)
 
     return enriched
+
 
 #########################################
 ########### Step 4: Synthesize ##########
@@ -426,6 +436,7 @@ Write a synthesis that:
 Write the synthesis now:"""
 
     return await _call_claude(prompt, max_tokens=3000)
+
 
 #########################################
 ############# Main endpoint #############

@@ -3,25 +3,24 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+import structlog
 
 from app.config import settings
 from app.models.paper import (
     Author,
     DomainValidationError,
-    HELIOPHYSICS_ARXIV_CATEGORIES,
-    HELIOPHYSICS_JOURNALS,
-    HELIOPHYSICS_KEYWORDS,
     IdentifierType,
     PaperMetadata,
+    heliophysics_arxiv_categories,
+    heliophysics_journals,
+    heliophysics_keywords,
 )
-import structlog
 
 logger = structlog.get_logger(__name__)
 
 
 def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
-    """Check if a paper is heliophysics-related using keyword matching.
-
+    """Check if a paper is heliophysics related using keyword matching.
     Used as a fallback for DOI lookups where the journal is not on the
     heliophysics whitelist. Broad journals like Nature or ApJ publish
     heliophysics papers so journal matching alone is not sufficient.
@@ -29,14 +28,14 @@ def _is_heliophysics_by_keywords(title: str, abstract: Optional[str]) -> bool:
     Args:
         title (str): The paper title.
         abstract (str | None): The paper abstract. May be None if the
-            external API did not return one.
+                                external API did not return one.
 
     Returns:
         bool: True if any heliophysics keyword is found in the title
-            or abstract, False otherwise.
+                or abstract, False otherwise.
     """
     text = f"{title} {abstract or ''}".lower()
-    return any(keyword.lower() in text for keyword in HELIOPHYSICS_KEYWORDS)
+    return any(keyword.lower() in text for keyword in heliophysics_keywords)
 
 
 target_phrases = {
@@ -45,6 +44,7 @@ target_phrases = {
     "rossby mode",
     "rossby wave",
     "inertial oscillation",
+    "magnetorossby",
 }
 
 solar_indicators = {
@@ -62,6 +62,10 @@ solar_indicators = {
     "solar corona",
     "solar cycle",
     "tachocline",
+    "solar dynamo",
+    "Sun's convection zone",
+    "solar differential rotation",
+    "solar magnetic field",
 }
 
 non_solar_indicators = {
@@ -77,11 +81,10 @@ non_solar_indicators = {
     "neutron star",
     "exoplanet",
     "kepler star",
-    "kic ",             
+    "kic ",
     "Kepler",
     "TESS",
     "Gaia",
-
     # Earth-based
     "monsoon",
     "sea ice",
@@ -95,7 +98,7 @@ non_solar_indicators = {
     "el nino",
     "enso",
     "ozone",
-    "blocking",                # atmospheric blocking
+    "blocking",  # atmospheric blocking
     "earth system model",
     "sea surface temperature",
     "boreal",
@@ -113,12 +116,12 @@ non_solar_indicators = {
     "atlantic",
 }
 
-EXCLUDED_JOURNALS = {
+excluded_journals = {
     "journal of climate",
     "journal of geophysical research",
     "atmospheric research",
     "climate dynamics",
-    "geophysical research letters",   # mostly earth science
+    "geophysical research letters",  # mostly earth science
     "atmospheric chemistry & physics",
     "atmosphere",
     "environmental research letters",
@@ -128,11 +131,13 @@ EXCLUDED_JOURNALS = {
     "EPSC-DPS Joint Meeting 2025",
 }
 
+
 def _is_excluded_journal(journal: Optional[str]) -> bool:
     """Return True if this journal is outside heliophysics scope."""
     if not journal:
         return False
-    return journal.lower().strip() in EXCLUDED_JOURNALS
+    return journal.lower().strip() in excluded_journals
+
 
 def _is_non_solar(title: str, abstract: Optional[str]) -> bool:
     """Return True if paper is clearly about non-solar objects."""
@@ -151,27 +156,26 @@ def _has_solar_indicator(title: str, abstract: Optional[str]) -> bool:
 
 
 def _is_heliophysics_by_journal(journal: Optional[str]) -> bool:
-    """Check if a paper is heliophysics-related by its journal name.
+    """Check if a paper is heliophysics related by its journal name.
 
     Args:
         journal (str | None): The journal name returned by the external API.
 
     Returns:
         bool: True if the journal is on the heliophysics whitelist,
-            False otherwise or if journal is None.
+                False otherwise or if journal is None.
     """
     if not journal:
         return False
-    return journal.lower().strip() in HELIOPHYSICS_JOURNALS
+    return journal.lower().strip() in heliophysics_journals
 
 
 def _is_stellar_astrophysics(title: str, abstract: Optional[str]) -> bool:
     """Check if a paper is stellar astrophysics rather than heliophysics.
-
-    Used as a rejection filter after category and keyword validation.
-    Some papers pass heliophysics keyword checks because they mention
-    'plasma' or 'magnetic field' but are fundamentally about stellar
-    evolution, stellar populations, or other non-solar topics.
+    Used as a rejection filter after category and keyword validation. Some
+    papers pass heliophysics keyword checks because they mention 'plasma'
+    or 'magnetic field' but are fundamentally about stellar evolution,
+    stellar populations, or other non-solar topics.
 
     Args:
         title (str): The paper title.
@@ -179,7 +183,7 @@ def _is_stellar_astrophysics(title: str, abstract: Optional[str]) -> bool:
 
     Returns:
         bool: True if the paper appears to be stellar astrophysics
-            rather than heliophysics, False otherwise.
+                rather than heliophysics, False otherwise.
     """
     stellar_title_keywords = {
         "red giant",
@@ -236,12 +240,9 @@ def _is_stellar_astrophysics(title: str, abstract: Optional[str]) -> bool:
 
 
 def _make_client() -> httpx.AsyncClient:
-    """Create a configured httpx async client for external API calls.
-
-    Centralizes client configuration so all external requests use the
-    same timeout, redirect, and header settings. arXiv requires https
-    and follows redirects. A descriptive User-Agent is good practice
-    and helps API maintainers identify traffic sources.
+    """Create a configured httpx async client for external API calls.  Centralizes
+    client configuration so all external requests use the same timeout, redirect,
+    and header settings. arXiv requires https and follows redirects.
 
     Returns:
         httpx.AsyncClient: Configured client ready for use as a context manager.
@@ -254,11 +255,10 @@ def _make_client() -> httpx.AsyncClient:
 
 
 async def _fetch_crossref(client: httpx.AsyncClient, doi: str) -> dict:
-    """Fetch paper metadata from the CrossRef API by DOI.
-
-    CrossRef is the primary source for DOI-based lookups. It returns
-    publisher metadata including title, authors, journal, and date.
-    Abstracts are frequently missing from CrossRef responses.
+    """Fetch paper metadata from the CrossRef API by DOI. CrossRef is the
+    primary source for DOI-based lookups. It returns publisher metadata
+    including title, authors, journal, and date. Abstracts are frequently
+    missing from CrossRef responses.
 
     Args:
         client (httpx.AsyncClient): The shared HTTP client for this request.
@@ -266,7 +266,7 @@ async def _fetch_crossref(client: httpx.AsyncClient, doi: str) -> dict:
 
     Returns:
         dict: The raw CrossRef message payload, or an empty dict if the
-            request fails or the DOI is not found.
+                request fails or the DOI is not found.
     """
     try:
         url = f"https://api.crossref.org/works/{doi}"
@@ -279,15 +279,12 @@ async def _fetch_crossref(client: httpx.AsyncClient, doi: str) -> dict:
 
 
 async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
-    """Fetch paper metadata from the arXiv API by arXiv ID.
-
-    See https://info.arxiv.org/help/api/index.html for API documentation.
-    arXiv is the primary source for preprint lookups. It returns title,
-    authors, abstract, and subject categories. The categories are used
-    for heliophysics domain validation.
-
-    arXiv returns Atom XML: this function parses it manually to avoid
-    pulling in a heavy XML parsing dependency.
+    """Fetch paper metadata from the arXiv API by arXiv ID. See
+    https://info.arxiv.org/help/api/index.html for API documentation. arXiv
+    is the primary source for preprint lookups. It returns title, authors,
+    abstract, and subject categories. The categories are used for heliophysics
+    domain validation. arXiv returns Atom XML: this function parses it manually
+    to avoid pulling in a heavy XML parsing dependency.
 
     Args:
         client (httpx.AsyncClient): The shared HTTP client for this request.
@@ -295,7 +292,7 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
 
     Returns:
         dict: Parsed arXiv entry as a dict, or an empty dict if the
-            request fails or the ID is not found.
+                    request fails or the ID is not found.
     """
     try:
         clean_id = arxiv_id.replace("arxiv:", "").strip()
@@ -323,7 +320,7 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
 
             Returns:
                 str: The text content between the tags, or empty string
-                    if the tag is not found.
+                        if the tag is not found.
             """
             start = entry_text.find(f"<{tag}>")
             end = entry_text.find(f"</{tag}>")
@@ -377,11 +374,10 @@ async def _fetch_arxiv(client: httpx.AsyncClient, arxiv_id: str) -> dict:
 async def _fetch_semantic_scholar(
     client: httpx.AsyncClient, doi: Optional[str], arxiv_id: Optional[str]
 ) -> dict:
-    """Fetch citation count from Semantic Scholar.
-
-    Semantic Scholar is used exclusively for citation counts which are
-    not available from CrossRef or arXiv directly. It accepts both DOIs
-    and arXiv IDs. DOI is preferred when available.
+    """Fetch citation count from Semantic Scholar. Semantic Scholar is used
+    exclusively for citation counts which are not available from CrossRef
+    or arXiv directly. It accepts both DOIs and arXiv IDs. DOI is preferred
+    when available.
 
     Args:
         client (httpx.AsyncClient): The shared HTTP client for this request.
@@ -414,25 +410,23 @@ async def _fetch_ads(
     client: httpx.AsyncClient,
     bibcode: str,
 ) -> dict:
-    """Fetch paper metadata from the NASA ADS API by bibcode.
-
-    ADS is the primary database for astronomy and astrophysics literature.
-    It indexes papers from arXiv, all major journals, conference proceedings,
-    and technical reports.
+    """Fetch paper metadata from the NASA ADS API by bibcode. ADS is the
+    primary database for astronomy and astrophysics literature. It indexes
+    papers from arXiv, all major journals, conference proceedings, and technical
+    reports.
 
     Args:
         client (httpx.AsyncClient): The shared HTTP client for this request.
-        bibcode (str): The ADS bibcode to look up.
-            e.g. '2025ApJ...123..456V'
+        bibcode (str): The ADS bibcode to look up. e.g. '2025ApJ...123..456V'
 
     Returns:
         dict: Parsed ADS paper metadata, or empty dict if not found.
     """
     try:
-        from app.config import settings
-
         # URL encode the bibcode (it contains special characters)
         import urllib.parse
+
+        from app.config import settings
 
         encoded = urllib.parse.quote(bibcode, safe="")
 
@@ -467,11 +461,9 @@ async def _fetch_ads(
 def _normalize_crossref(
     doi: str, data: dict, citation_count: Optional[int]
 ) -> PaperMetadata:
-    """Normalize a raw CrossRef response into a PaperMetadata object.
-
-    CrossRef returns nested, inconsistent structures. This function
-    extracts and normalizes the fields we care about into the clean
-    PaperMetadata schema.
+    """Normalize a raw CrossRef response into a PaperMetadata object. CrossRef
+    returns nested, inconsistent structures. This function extracts and normalizes
+    the fields we care about into the clean PaperMetadata schema.
 
     Args:
         doi (str): The DOI that was looked up.
@@ -566,11 +558,10 @@ def _normalize_ads(
     bibcode: str,
     data: dict,
 ) -> PaperMetadata:
-    """Normalize a raw ADS response into a PaperMetadata object.
-
-    ADS returns cleaner, more complete metadata than CrossRef for
-    astronomy papers. Abstracts are almost always present. Author
-    lists are complete. Keywords are included when available.
+    """Normalize a raw ADS response into a PaperMetadata object. ADS returns
+    cleaner, more complete metadata than CrossRef for astronomy papers.
+    Abstracts are almost always present. Author lists are complete.
+    Keywords are included when available.
 
     Args:
         bibcode (str): The ADS bibcode that was looked up.
@@ -583,7 +574,7 @@ def _normalize_ads(
     raw_authors = data.get("author", [])
     authors = [Author(name=name) for name in raw_authors]
 
-    # Extract title — ADS returns a list
+    # Extract title (ADS returns a list)
     titles = data.get("title", [])
     title = titles[0] if titles else "Unknown Title"
 
@@ -633,11 +624,10 @@ def _normalize_ads(
 
 
 async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
-    """Fetch and validate a heliophysics paper by DOI.
-
-    Hits CrossRef and Semantic Scholar concurrently using asyncio.gather.
-    Validates that the paper contains target phrases (inertial modes/waves,
-    rossby modes/waves) and solar indicators before returning.
+    """Fetch and validate a heliophysics paper by DOI. Hits CrossRef and
+    Semantic Scholar concurrently using asyncio.gather. Validates that the
+    paper contains target phrases (inertial modes/waves, rossby modes/waves)
+    and solar indicators before returning.
 
     Args:
         doi (str): The DOI to look up. e.g. 10.1038/nature12373
@@ -679,7 +669,7 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
         log.warning("target_phrase_missing", duration_ms=duration_ms)
         return DomainValidationError(
             identifier=doi,
-            reason="Paper does not contain target phrases (inertial modes/waves, rossby modes/waves).",
+            reason="Paper does not contain target phrases.",
             title=title,
         )
 
@@ -687,7 +677,7 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
         log.warning("solar_indicator_missing", duration_ms=duration_ms)
         return DomainValidationError(
             identifier=doi,
-            reason="Paper does not appear to be solar/heliophysics-related.",
+            reason="Paper does not appear to be solar/heliophysics related.",
             title=title,
         )
 
@@ -696,11 +686,9 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
 
 
 async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError:
-    """Fetch and validate a heliophysics paper by arXiv ID.
-
-    Hits arXiv and Semantic Scholar concurrently using asyncio.gather.
-    Validates the result against heliophysics arXiv category list
-    before returning. Rejects papers outside heliophysics categories.
+    """Fetch and validate a heliophysics paper by arXiv ID.  Hits arXiv and Semantic
+    Scholar concurrently using asyncio.gather. Validates the result against heliophysics
+    arXiv category list before returning. Rejects papers outside heliophysics categories.
 
     Args:
         arxiv_id (str): The arXiv ID to look up. e.g. 2301.04380
@@ -737,10 +725,10 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
     citation_count = semantic_data.get("citation_count")
 
     primary_category = categories[0] if categories else ""
-    matching_categories = [c for c in categories if c in HELIOPHYSICS_ARXIV_CATEGORIES]
+    matching_categories = [c for c in categories if c in heliophysics_arxiv_categories]
 
     if (
-        primary_category not in HELIOPHYSICS_ARXIV_CATEGORIES
+        primary_category not in heliophysics_arxiv_categories
         and len(matching_categories) < 2
     ):
         log.warning(
@@ -764,15 +752,12 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
 
 
 async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
-    """Fetch and validate a heliophysics paper by ADS bibcode.
-
-    Hits the NASA ADS API and validates that the paper contains target
-    phrases (inertial modes/waves, rossby modes/waves) and solar indicators
-    before returning.
+    """Fetch and validate a heliophysics paper by ADS bibcode. Hits the NASA ADS
+    API and validates that the paper contains target phrases (e.g., inertial modes/waves,
+    rossby modes/waves) and solar indicators before returning.
 
     Args:
-        bibcode (str): The ADS bibcode to look up.
-            e.g. '2025ApJ...123..456V'
+        bibcode (str): The ADS bibcode to look up. e.g. '2025ApJ...123..456V'
 
     Returns:
         PaperMetadata: Normalized metadata if paper passes validation.
@@ -813,7 +798,7 @@ async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
         log.warning("target_phrase_missing", duration_ms=duration_ms)
         return DomainValidationError(
             identifier=bibcode,
-            reason="Paper does not contain target phrases (inertial modes/waves, rossby modes/waves).",
+            reason="Paper does not contain target phrases.",
             title=title,
         )
 
@@ -821,14 +806,14 @@ async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
         log.warning("solar_indicator_missing", duration_ms=duration_ms)
         return DomainValidationError(
             identifier=bibcode,
-            reason="Paper does not appear to be solar/heliophysics-related.",
+            reason="Paper does not appear to be solar/heliophysics related.",
             title=title,
         )
     if _is_non_solar(title, abstract):
         log.warning("non_solar_object", duration_ms=duration_ms)
         return DomainValidationError(
             identifier=bibcode,
-            reason="Paper is about non-solar objects (white dwarfs, other stars, planets).",
+            reason="Paper is about nonsolar objects (white dwarfs, other stars, planets).",
             title=title,
         )
     log.info("fetch_complete", duration_ms=duration_ms, source="ads")

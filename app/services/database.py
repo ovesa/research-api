@@ -6,10 +6,9 @@ from app.models.paper import Author, IdentifierType, PaperMetadata
 
 
 async def save_paper(paper: PaperMetadata) -> None:
-    """Save a validated heliophysics paper to Postgres.
-
-    Called after every successful fetch and heliophysics validation.
-    Uses INSERT ... ON CONFLICT DO NOTHING so re-fetching an already
+    """Save a validated heliophysics paper to Postgres. Called
+    after every successful fetch and heliophysics validation. Uses
+    INSERT ... ON CONFLICT DO NOTHING so re-fetching an already
     stored paper is safe and does not overwrite existing data.
 
     Args:
@@ -50,11 +49,10 @@ async def save_paper(paper: PaperMetadata) -> None:
 
 
 async def get_paper(identifier: str) -> Optional[PaperMetadata]:
-    """Retrieve a single paper from Postgres by identifier.
-
-    Used as a fallback when Redis cache has expired but the paper
-    is still in the database. Avoids hitting external APIs again
-    for data we already have.
+    """Retrieve a single paper from Postgres by identifier. Used
+    as a fallback when Redis cache has expired but the paper is
+    still in the database. Avoids hitting external APIs again for
+    data we already have.
 
     Args:
         identifier (str): The DOI or arXiv ID to look up.
@@ -76,18 +74,17 @@ async def get_paper(identifier: str) -> Optional[PaperMetadata]:
 
 
 async def delete_paper(identifier: str) -> bool:
-    """Delete a single paper from Postgres by identifier.
-
-    Used when a paper needs to be removed from the collection. For
-    example if it was ingested by mistake or fails manual review.
-    Also clears the Redis cache entry so stale data is not served.
+    """Delete a single paper from Postgres by identifier. Used
+    when a paper needs to be removed from the collection. For example
+    if it was ingested by mistake or fails manual review. Also clears
+    the Redis cache entry so stale data is not served.
 
     Args:
         identifier (str): The DOI, arXiv ID, or ADS bibcode to delete.
 
     Returns:
         bool: True if a paper was deleted, False if no paper was found
-            with that identifier.
+                with that identifier.
     """
     pool = await get_pool()
 
@@ -103,16 +100,14 @@ async def delete_paper(identifier: str) -> bool:
 
 
 async def patch_paper(identifier: str, updates: dict) -> Optional[PaperMetadata]:
-    """Partially update a stored paper's fields.
-
-    Builds a dynamic UPDATE query from only the fields provided.
-    Fields not included in updates are left unchanged. Returns the
-    updated paper so the caller can cache the fresh version.
+    """Partially update a stored paper's fields. Builds a dynamic UPDATE query
+    from only the fields provided. Fields not included in updates are left unchanged.
+    Returns the updated paper so the caller can cache the fresh version.
 
     Args:
         identifier (str): The identifier of the paper to update.
-        updates (dict): A dict of field names to new values.
-            Only non-None fields from the patch request should be passed.
+        updates (dict): A dict of field names to new values. Only non "None" fields
+                            from the patch request should be passed.
 
     Returns:
         PaperMetadata: The updated paper if found, None if not found.
@@ -122,7 +117,7 @@ async def patch_paper(identifier: str, updates: dict) -> Optional[PaperMetadata]
 
     pool = await get_pool()
 
-    # Build SET clause dynamically from provided fields only
+    # Build set clause dynamically from provided fields only
     set_clauses = []
     params = []
     param_index = 1
@@ -165,7 +160,8 @@ async def list_papers(
 
     Returns:
         tuple[list[PaperMetadata], int]: A list of papers and the total
-            count matching the filters, for pagination metadata.
+                                            count matching the filters,
+                                            for pagination metadata.
     """
     pool = await get_pool()
 
@@ -207,13 +203,12 @@ async def list_papers(
 
 async def get_stats() -> dict:
     """Return aggregate statistics about the stored paper collection.
-
-    Queries Postgres for counts grouped by category, source, and
-    identifier type. Exposed via the /papers/stats endpoint.
+    Queries Postgres for counts grouped by category, source, and identifier
+    type. Exposed via the /papers/stats endpoint.
 
     Returns:
         dict: Contains total count, breakdown by source, breakdown by
-            identifier type, and the most recently fetched paper date.
+                identifier type, and the most recently fetched paper date.
     """
     pool = await get_pool()
 
@@ -236,11 +231,10 @@ async def get_stats() -> dict:
 
 
 def _row_to_paper(row) -> PaperMetadata:
-    """Convert a raw asyncpg database row into a PaperMetadata object.
-
-    asyncpg returns rows as Record objects. This function normalizes
-    the raw types, parsing JSON strings back into Python objects and
-    reconstructing nested Pydantic models.
+    """Convert a raw asyncpg database row into a PaperMetadata object. asyncpg
+    returns rows as Record objects. This function normalizes the raw types,
+    parsing JSON strings back into Python objects and reconstructing nested
+    Pydantic models.
 
     Args:
         row: An asyncpg Record object from a papers table query.
@@ -277,28 +271,24 @@ async def search_papers(
     limit: int = 20,
     offset: int = 0,
 ) -> tuple[list[PaperMetadata], int]:
-    """Search stored papers using Postgres full text search.
-
-    Uses tsvector and ts_rank to find and rank papers by relevance.
-    Title matches rank higher than abstract matches due to 'A' and 'B'
-    weights set during indexing. Results are ordered by relevance score
-    descending so the best matches appear first.
-
-    Stemming is handled automatically by Postgres: searching 'magnetohydrodynamic'
-    will match 'magnetohydrodynamics', searching 'wave' matches 'waves',
-    'waving', 'wavelength' and so on. tsvector converts raw text into a
-    searchable token list.
+    """Search stored papers using Postgres full text search. Uses tsvector
+    and ts_rank to find and rank papers by relevance. Title matches rank
+    higher than abstract matches due to 'A' and 'B' weights set during indexing.
+    Results are ordered by relevance score descending so the best matches appear
+    first. Stemming is handled automatically by Postgres: searching 'magnetohydrodynamic'
+    will match 'magnetohydrodynamics', searching 'wave' matches 'waves', 'wavelength'
+    and so on. tsvector converts raw text into a searchable token list.
 
     Args:
         query (str): The search terms to look for. Can be multiple words.
-            e.g. 'solar wind', 'magnetic field oscillations'
+                        e.g. 'solar wind', 'magnetic field oscillations'
         limit (int): Maximum number of results to return. Defaults to 20.
         offset (int): Number of results to skip for pagination.
 
     Returns:
-        tuple[list[PaperMetadata], int]: Matching papers ordered by
-            relevance score, and the total count of matches for
-            pagination metadata.
+        tuple[list[PaperMetadata], int]: Matching papers ordered by relevance score,
+                                            and the total count of matches for pagination
+                                            metadata.
     """
     pool = await get_pool()
 
@@ -345,18 +335,16 @@ async def filter_papers_by_keywords(
     limit: int = 20,
     offset: int = 0,
 ) -> tuple[list[PaperMetadata], int]:
-    """Filter stored papers by explicit keywords in title or abstract.
-
-    Unlike full text search, this does exact substring matching (case-
-    insensitive) against each keyword. Useful when you want papers that
-    specifically contain a term like 'inertial modes' without stemming
-    or relevance ranking changing your results.
+    """Filter stored papers by explicit keywords in title or abstract. Unlike
+    full text search, this does exact substring matching (case insensitive)
+    against each keyword. Useful when you want papers that specifically contain
+    a term like 'inertial modes' without stemming or relevance ranking changing
+    your results.
 
     Args:
-        keywords (list[str]): Keywords to filter by.
-            e.g. ['inertial modes', 'rossby waves']
-        match_all (bool): If True, paper must contain ALL keywords.
-            If False, paper must contain AT LEAST ONE. Defaults to False.
+        keywords (list[str]): Keywords to filter by. e.g. ['inertial modes', 'rossby waves']
+        match_all (bool): If True, paper must contain ALL keywords. If False,
+                            paper must contain AT LEAST ONE. Defaults to False.
         limit (int): Maximum number of results to return. Defaults to 20.
         offset (int): Number of results to skip for pagination.
 

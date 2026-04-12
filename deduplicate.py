@@ -16,10 +16,10 @@
 
 
 import argparse
+import asyncio
 import sys
 
 import asyncpg
-import asyncio
 
 from app.config import settings
 
@@ -37,19 +37,18 @@ async def get_pool() -> asyncpg.Pool:
 
 
 async def find_duplicates(pool: asyncpg.Pool) -> list[dict]:
-    """Find all pairs of records that share the same DOI.
-
-    Queries Postgres for any DOI that appears in more than one row.
-    Returns each duplicate group with both records so we can decide
-    which one to keep.
+    """Find all pairs of records that share the same DOI. Queries
+    Postgres for any DOI that appears in more than one row. Returns
+    each duplicate group with both records so we can decide which
+    one to keep.
 
     Args:
         pool (asyncpg.Pool): The database connection pool.
 
     Returns:
         list[dict]: Each entry contains the shared doi and both records
-            as 'keeper' and 'duplicate', with the ADS record preferred
-            as keeper.
+                        as 'keeper' and 'duplicate', with the ADS record
+                        preferred as keeper.
     """
     async with pool.acquire() as conn:
         # Find all DOIs that appear more than once
@@ -114,17 +113,16 @@ async def find_duplicates(pool: asyncpg.Pool) -> list[dict]:
 async def merge_duplicates(
     pool: asyncpg.Pool, groups: list[dict], dry_run: bool
 ) -> None:
-    """Delete the weaker record in each duplicate group.
-
-    The keeper record already has the best metadata. Deleting the weaker
-    record is sufficient. No field merging needed because ADS records
-    are always more complete than arXiv-only records for published papers.
+    """Delete the weaker record in each duplicate group. The keeper record
+    already has the best metadata. Deleting the weaker record is sufficient.
+    No field merging needed because ADS records are always more complete than
+    arXiv only records for published papers.
 
     Args:
         pool (asyncpg.Pool): The database connection pool.
         groups (list[dict]): Duplicate groups from find_duplicates().
-        dry_run (bool): If True, report what would be deleted without
-            making any changes.
+        dry_run (bool): If True, report what would be deleted without making
+                            any changes.
     """
     total_deleted = 0
 
@@ -135,14 +133,14 @@ async def merge_duplicates(
 
         print(f"\n  DOI: {doi}")
         print(
-            f"  ✓ keeping  : {keeper['identifier']} ({keeper['source']})"
-            f" — citations: {keeper['citation_count']}, abstract: {keeper['has_abstract']}"
+            f"  keeping  : {keeper['identifier']} ({keeper['source']})"
+            f" citations: {keeper['citation_count']}, abstract: {keeper['has_abstract']}"
         )
 
         for dup in to_delete:
             print(
-                f"  ✗ removing : {dup['identifier']} ({dup['source']})"
-                f" — citations: {dup['citation_count']}, abstract: {dup['has_abstract']}"
+                f"  removing : {dup['identifier']} ({dup['source']})"
+                f" citations: {dup['citation_count']}, abstract: {dup['has_abstract']}"
             )
 
             if not dry_run:
@@ -177,7 +175,7 @@ async def run(dry_run: bool) -> None:
         groups = await find_duplicates(pool)
 
         if not groups:
-            print("\n  No duplicates found — collection is clean.\n")
+            print("\n  No duplicates found...collection is clean.\n")
             return
 
         print(f"  Found {len(groups)} duplicate group(s).\n")

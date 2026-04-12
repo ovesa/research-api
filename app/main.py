@@ -3,16 +3,16 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
 from app.cache import close_redis, get_redis
 from app.config import settings
 from app.database import close_pool, get_pool
 from app.logging_config import setup_logging
 from app.middleware import RequestLoggingMiddleware
-from app.routers import papers, agent 
-
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
+from app.routers import agent, papers
 
 # Set up logging before anything else
 setup_logging(debug=settings.debug)
@@ -21,11 +21,10 @@ logger = structlog.get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage startup and shutdown of shared resources.
-
-    FastAPI calls everything before the yield on startup and everything
-    after the yield on shutdown. Warms up Postgres and Redis connections
-    so the first request does not pay the connection cost.
+    """Manage startup and shutdown of shared resources. FastAPI calls
+    everything before the yield on startup and everything after the
+    yield on shutdown. Warms up Postgres and Redis connections so the
+    first request does not pay the connection cost.
 
     Args:
         app (FastAPI): The FastAPI application instance.
@@ -58,7 +57,7 @@ app = FastAPI(
         "A heliophysics research paper metadata API. "
         "Look up papers by DOI or arXiv ID and get normalized metadata "
         "including authors, abstracts, citation counts, and more. "
-        "Only heliophysics-related papers are accepted."
+        "Only heliophysics related papers are accepted."
     ),
     version="0.1.0",
     lifespan=lifespan,
@@ -77,7 +76,8 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(papers.router)
-app.include_router(agent.router) 
+app.include_router(agent.router)
+
 
 @app.get("/health/live", tags=["health"])
 async def liveness():
@@ -91,10 +91,9 @@ async def liveness():
 
 @app.get("/health/ready", tags=["health"])
 async def readiness():
-    """Confirm the application is ready to serve requests.
-
-    Checks that both Postgres and Redis are reachable. Used by container
-    orchestrators to know whether to send traffic to this instance.
+    """Confirm the application is ready to serve requests. Checks that
+    both Postgres and Redis are reachable. Used by container orchestrators
+    to know whether to send traffic to this instance.
 
     Returns:
         dict: Status ok with confirmation that both services are connected.

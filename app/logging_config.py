@@ -1,16 +1,17 @@
 import logging
+
 import structlog
 
 
 def setup_logging(debug: bool = False) -> None:
-    """Configure structured JSON logging for the application.
-
-    Sets up structlog to output JSON-formatted log lines with consistent
+    """Configure structured JSON logging for the application. Sets
+    up structlog to output JSON-formatted log lines with consistent
     fields across all log calls.
 
     Args:
         debug (bool): If True, use pretty console output instead of JSON.
-            Should match the DEBUG environment variable. Defaults to False.
+                        Should match the DEBUG environment variable.
+                        Defaults to False.
 
     Returns:
         None

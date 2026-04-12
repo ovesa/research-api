@@ -10,15 +10,13 @@ logger = structlog.get_logger(__name__)
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware that adds correlation IDs and logs every request.
-
-    Runs on every incoming HTTP request before it reaches any endpoint.
-    Generates a unique request ID, attaches it to the response headers,
-    and logs the request start and completion with timing information.
-
-    The request ID is threaded through all log lines produced during
-    that request using structlog's context binding. This means you can
-    filter logs by request_id to see the entire lifecycle of one request.
+    """Middleware that adds correlation IDs and logs every request. Runs
+    on every incoming HTTP request before it reaches any endpoint. Generates
+    a unique request ID, attaches it to the response headers, and logs the
+    request start and completion with timing information. The request ID is
+    threaded through all log lines produced during that request using structlog's
+    context binding. This means you can filter logs by request_id to see the entire
+    lifecycle of one request.
 
     Example log output:
         {
