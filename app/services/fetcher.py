@@ -48,7 +48,6 @@ target_phrases = {
 }
 
 solar_indicators = {
-    "solar",
     "the sun",
     "sun:",
     "on the sun",
@@ -85,6 +84,7 @@ non_solar_indicators = {
     "Kepler",
     "TESS",
     "Gaia",
+    "NGC",
     # Earth-based
     "monsoon",
     "sea ice",
