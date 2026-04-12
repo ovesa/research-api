@@ -23,11 +23,10 @@ async def save_paper(paper: PaperMetadata) -> None:
 
     async with pool.acquire() as conn:
         await conn.execute(
-            """
-            INSERT INTO papers (
+            """INSERT INTO papers (
                 identifier, identifier_type, title, authors, abstract,
                 published_date, journal, doi, arxiv_id,
-                citation_count, source, fetched_at, url
+                citation_count, source, fetched_at, url, is_heliophysics
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (identifier) DO NOTHING
@@ -45,6 +44,7 @@ async def save_paper(paper: PaperMetadata) -> None:
             paper.source,
             paper.fetched_at,
             paper.url,
+            paper.is_heliophysics,
         )
 
 
