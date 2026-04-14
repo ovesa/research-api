@@ -650,6 +650,9 @@ async def fetch_by_doi(doi: str) -> PaperMetadata | DomainValidationError:
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
 
+    if duration_ms > 2000:
+        log.warning("fetch_slow", duration_ms=duration_ms, threshold_ms=2000)
+        
     if not crossref_data:
         log.warning(
             "fetch_failed", reason="DOI not found in CrossRef", duration_ms=duration_ms
@@ -711,6 +714,8 @@ async def fetch_by_arxiv(arxiv_id: str) -> PaperMetadata | DomainValidationError
         )
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    if duration_ms > 2000:
+        log.warning("fetch_slow", duration_ms=duration_ms, threshold_ms=2000)
 
     if not arxiv_data:
         log.warning(
@@ -773,6 +778,8 @@ async def fetch_by_ads(bibcode: str) -> PaperMetadata | DomainValidationError:
         ads_data = await _fetch_ads(client, bibcode)
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    if duration_ms > 2000:
+        log.warning("fetch_slow", duration_ms=duration_ms, threshold_ms=2000)
 
     if not ads_data:
         log.warning(
