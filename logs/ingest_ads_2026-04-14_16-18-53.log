@@ -1,0 +1,16 @@
+[2026-04-14_16-18-53] Starting scheduled ingestion: source=ads
+
+Fetching ADS papers from 2026-03 to 2026-04...
+Keywords: abs:"rossby wave" OR abs:"inertial wave" OR abs:"rossby mode" OR abs:"inertial mode"
+
+
+── Ingestion complete ─────────────────────────────
+  Source          : NASA ADS (keyword mode)
+  Total found     : 65
+  Newly ingested  : 0
+  Already stored  : 2
+  Rejected        : 63
+  Failed          : 0
+───────────────────────────────────────────────────
+
+[2026-04-14_16-19-18] Ingestion complete.

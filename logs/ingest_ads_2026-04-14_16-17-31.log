@@ -1,0 +1,16 @@
+[2026-04-14_16-17-31] Starting scheduled ingestion: source=ads
+
+Fetching ADS papers from 2026-03 to 2026-04...
+Keywords: abs:"solar wind" OR abs:"coronal mass ejection" OR abs:"solar flare" OR abs:"magnetosphere" OR abs:"heliosphere" OR abs:"helioseismology" OR abs:"inertial modes" OR abs:"rossby waves" OR abs:"solar oscillation" OR abs:"magnetohydrodynamics" OR abs:"corona" OR abs:"chromosphere" OR abs:"photosphere" OR abs:"solar atmosphere" OR abs:"space weather" OR abs:"magnetic reconnection" OR abs:"solar eruption" OR abs:"parker solar probe" OR abs:"solar orbiter" OR abs:"SDO" OR abs:"HMI"
+
+
+── Ingestion complete ─────────────────────────────
+  Source          : NASA ADS (keyword mode)
+  Total found     : 100
+  Newly ingested  : 0
+  Already stored  : 0
+  Rejected        : 100
+  Failed          : 0
+───────────────────────────────────────────────────
+
+[2026-04-14_16-18-20] Ingestion complete.
