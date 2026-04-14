@@ -14,7 +14,7 @@ sleep 2
 echo "Postgres is ready."
 
 echo "Running migrations..."
-alembic upgrade heads
+DATABASE_URL=postgresql://researchapi:researchapi@localhost:5432/researchapi
 
 echo "Starting API..."
 uvicorn app.main:app --reload
