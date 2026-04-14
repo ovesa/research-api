@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.cache import cache_paper, get_cached_paper
+from app.cache import cache_paper, get_cached_paper, get_redis
 from app.models.paper import (
     BulkLookupRequest,
     CacheStats,
@@ -36,12 +36,6 @@ from app.services.ingestion import (
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 limiter = Limiter(key_func=get_remote_address)
-
-# In-memory cache hit/miss counters
-# In production these would live in Redis so they persist across restarts
-_cache_hits = 0
-_cache_misses = 0
-
 
 def pagination_meta(total: int, limit: int, offset: int) -> dict:
     """Calculate pagination metadata for list responses.
@@ -73,7 +67,6 @@ def pagination_meta(total: int, limit: int, offset: int) -> dict:
         "prev_offset": max(offset - limit, 0) if has_prev else None,
     }
 
-
 @router.post(
     "/lookup",
     response_model=Union[PaperMetadata, DomainValidationError],
@@ -100,12 +93,12 @@ async def lookup_paper(request: Request, request_body: PaperLookupRequest):
                                     heliophysics related or the identifier
                                     is not found.
     """
-    global _cache_hits, _cache_misses
+    client = await get_redis()
 
     # (1) Redis cache
     cached = await get_cached_paper(request_body.identifier)
     if cached:
-        _cache_hits += 1
+        await client.incr("metrics:cache_hits")
         data = json.loads(cached)
         if "source" in data:
             return PaperMetadata(**data)
@@ -114,14 +107,14 @@ async def lookup_paper(request: Request, request_body: PaperLookupRequest):
     # (2) Postgres
     stored = await get_paper(request_body.identifier)
     if stored:
-        _cache_hits += 1
+        await client.incr("metrics:cache_hits")
         # Repopulate Redis so next request is even faster
         await cache_paper(
             request_body.identifier, json.dumps(stored.model_dump(), default=str)
         )
         return stored
 
-    _cache_misses += 1
+    await client.incr("metrics:cache_misses")
 
     # (3) External APIs
     if request_body.identifier_type == IdentifierType.doi:
@@ -130,6 +123,7 @@ async def lookup_paper(request: Request, request_body: PaperLookupRequest):
         result = await fetch_by_arxiv(request_body.identifier)
     else:
         result = await fetch_by_ads(request_body.identifier)
+
     # Cache the result regardless of validation outcome
     await cache_paper(
         request_body.identifier, json.dumps(result.model_dump(), default=str)
@@ -174,12 +168,12 @@ async def bulk_lookup(request: BulkLookupRequest):
             PaperMetadata | DomainValidationError: The result for
                                                     this identifier.
         """
-        global _cache_hits, _cache_misses
+        client = await get_redis()
 
         # (1) Redis
         cached = await get_cached_paper(identifier)
         if cached:
-            _cache_hits += 1
+            await client.incr("metrics:cache_hits")
             data = json.loads(cached)
             if "source" in data:
                 return PaperMetadata(**data)
@@ -188,11 +182,11 @@ async def bulk_lookup(request: BulkLookupRequest):
         # (2) Postgres
         stored = await get_paper(identifier)
         if stored:
-            _cache_hits += 1
+            await client.incr("metrics:cache_hits")
             await cache_paper(identifier, json.dumps(stored.model_dump(), default=str))
             return stored
 
-        _cache_misses += 1
+        await client.incr("metrics:cache_misses")
 
         # (3) External APIs
         if request.identifier_type == IdentifierType.doi:
@@ -389,7 +383,6 @@ async def collection_stats():
     """
     return await get_stats()
 
-
 @router.get(
     "/metrics",
     response_model=CacheStats,
@@ -398,17 +391,17 @@ async def collection_stats():
 async def get_metrics():
     """Return cache hit and miss statistics.
 
-    Args:
-        None
-
     Returns:
         CacheStats: Current hit count, miss count, and hit rate ratio.
     """
-    total = _cache_hits + _cache_misses
-    hit_rate = _cache_hits / total if total > 0 else 0.0
+    client = await get_redis()
+    hits = int(await client.get("metrics:cache_hits") or 0)
+    misses = int(await client.get("metrics:cache_misses") or 0)
+    total = hits + misses
+    hit_rate = hits / total if total > 0 else 0.0
     return CacheStats(
-        hits=_cache_hits,
-        misses=_cache_misses,
+        hits=hits,
+        misses=misses,
         hit_rate=round(hit_rate, 4),
     )
 
