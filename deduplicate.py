@@ -109,6 +109,73 @@ async def find_duplicates(pool: asyncpg.Pool) -> list[dict]:
 
     return duplicates
 
+async def find_arxiv_duplicates(pool: asyncpg.Pool) -> list[dict]:
+    """Find pairs of records that share the same arXiv ID but were ingested
+    from different sources (e.g. once from arXiv, once from ADS). These are
+    missed by find_duplicates() because they may not share a DOI.
+
+    Args:
+        pool (asyncpg.Pool): The database connection pool.
+
+    Returns:
+        list[dict]: Each entry contains the shared arxiv_id and both records
+                        as 'keeper' and 'duplicates', with ADS preferred.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT arxiv_id, array_agg(identifier) AS identifiers,
+                   array_agg(identifier_type) AS types,
+                   array_agg(source) AS sources,
+                   array_agg(citation_count) AS citation_counts,
+                   array_agg(abstract IS NOT NULL) AS has_abstract
+            FROM papers
+            WHERE arxiv_id IS NOT NULL AND arxiv_id != ''
+            GROUP BY arxiv_id
+            HAVING COUNT(*) > 1
+            """
+        )
+
+    duplicates = []
+    for row in rows:
+        identifiers = row["identifiers"]
+        types = row["types"]
+        sources = row["sources"]
+        citation_counts = row["citation_counts"]
+        has_abstracts = row["has_abstract"]
+
+        candidates = [
+            {
+                "identifier": identifiers[i],
+                "type": types[i],
+                "source": sources[i],
+                "citation_count": citation_counts[i],
+                "has_abstract": has_abstracts[i],
+            }
+            for i in range(len(identifiers))
+        ]
+
+        def keeper_score(c: dict) -> tuple:
+            return (
+                c["source"] == "ads",
+                c["citation_count"] is not None,
+                c["has_abstract"],
+            )
+
+        candidates.sort(key=keeper_score, reverse=True)
+        keeper = candidates[0]
+        to_delete = candidates[1:]
+
+        duplicates.append(
+            {
+                "arxiv_id": row["arxiv_id"],
+                "keeper": keeper,
+                "duplicates": to_delete,
+            }
+        )
+
+    return duplicates
+
 
 async def merge_duplicates(
     pool: asyncpg.Pool, groups: list[dict], dry_run: bool
@@ -161,7 +228,6 @@ async def merge_duplicates(
         print(f"  Actually deleted       : {total_deleted}")
     print("───────────────────────────────────────────────────\n")
 
-
 async def run(dry_run: bool) -> None:
     """Main entry point: find and optionally merge duplicates.
 
@@ -172,14 +238,20 @@ async def run(dry_run: bool) -> None:
 
     try:
         print("\nScanning for duplicate DOIs...")
-        groups = await find_duplicates(pool)
+        doi_groups = await find_duplicates(pool)
+        print(f"  Found {len(doi_groups)} DOI duplicate group(s).")
 
-        if not groups:
+        print("\nScanning for duplicate arXiv IDs...")
+        arxiv_groups = await find_arxiv_duplicates(pool)
+        print(f"  Found {len(arxiv_groups)} arXiv ID duplicate group(s).\n")
+
+        all_groups = doi_groups + arxiv_groups
+
+        if not all_groups:
             print("\n  No duplicates found...collection is clean.\n")
             return
 
-        print(f"  Found {len(groups)} duplicate group(s).\n")
-        await merge_duplicates(pool, groups, dry_run)
+        await merge_duplicates(pool, all_groups, dry_run)
 
     finally:
         await pool.close()
