@@ -234,11 +234,11 @@ async def _search_papers(params: dict) -> list[dict]:
 ### Step 3: Ensure extractions exist ####
 #########################################
 
-
 async def _ensure_extractions(papers: list[dict]) -> list[dict]:
     """For any paper without an extraction, call Claude to extract it.
     Extractions are cached in Postgres so this only calls Claude for
-    papers that haven't been processed yet.
+    papers that haven't been processed yet. Extractions run concurrently
+    with a semaphore to cap parallel Claude calls at 5.
 
     Args:
         papers (list[dict]): Papers from the database search.
@@ -246,40 +246,41 @@ async def _ensure_extractions(papers: list[dict]) -> list[dict]:
     Returns:
         list[dict]: Same papers with extractions filled in.
     """
-    enriched = []
-    for paper in papers:
+    import asyncio
+
+    semaphore = asyncio.Semaphore(5)
+
+    async def enrich_one(paper: dict) -> dict:
         if paper.get("central_contribution"):
-            enriched.append(paper)
-            continue
+            return paper
 
         if not paper.get("abstract"):
-            enriched.append(paper)
-            continue
+            return paper
 
         existing = await get_extraction(paper["identifier"])
         if existing:
             paper.update(existing)
-            enriched.append(paper)
-            continue
+            return paper
 
-        try:
-            result, raw_response = await extract_abstract(
-                paper["identifier"],
-                paper["title"],
-                paper["abstract"],
-            )
-            await save_extraction(paper["identifier"], result, raw_response)
-            paper.update(result)
-        except Exception as e:
-            logger.warning(
-                "extraction_failed_in_agent",
-                identifier=paper["identifier"],
-                error=str(e),
-            )
+        async with semaphore:
+            try:
+                result, raw_response = await extract_abstract(
+                    paper["identifier"],
+                    paper["title"],
+                    paper["abstract"],
+                )
+                await save_extraction(paper["identifier"], result, raw_response)
+                paper.update(result)
+            except Exception as e:
+                logger.warning(
+                    "extraction_failed_in_agent",
+                    identifier=paper["identifier"],
+                    error=str(e),
+                )
 
-        enriched.append(paper)
+        return paper
 
-    return enriched
+    return list(await asyncio.gather(*[enrich_one(p) for p in papers]))
 
 
 #########################################
