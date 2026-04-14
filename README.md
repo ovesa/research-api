@@ -43,7 +43,7 @@ are already extracted are faster.
 
 ## Architecture
 
-text```
+```
 Client
   |
   v
