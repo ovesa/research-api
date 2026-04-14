@@ -350,5 +350,4 @@ python export_bibtex.py --relevance primary --output primary.bib
 
 ## Acknowledgements
 
-Thank you to arXiv for use of its open access interoperability, and to NASA ADS for
-providing a free API with BibTeX export.
+Thank you to arXiv for use of its open access interoperability, and to NASA ADS.
