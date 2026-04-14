@@ -109,6 +109,7 @@ async def find_duplicates(pool: asyncpg.Pool) -> list[dict]:
 
     return duplicates
 
+
 async def find_arxiv_duplicates(pool: asyncpg.Pool) -> list[dict]:
     """Find pairs of records that share the same arXiv ID but were ingested
     from different sources (e.g. once from arXiv, once from ADS). These are
@@ -227,6 +228,7 @@ async def merge_duplicates(
     if not dry_run:
         print(f"  Actually deleted       : {total_deleted}")
     print("───────────────────────────────────────────────────\n")
+
 
 async def run(dry_run: bool) -> None:
     """Main entry point: find and optionally merge duplicates.

@@ -245,7 +245,6 @@ the target keywords. Logs go to `logs/ingest_ads_<timestamp>.log`.
 ls logs/
 ```
 
-
 ## Quick start
 
 You need Docker and Python 3.12+.
@@ -261,8 +260,8 @@ cp .env.example .env
 Go to `http://localhost:8000/docs` for the interactive API docs.
 Open `agent.html` in your browser for the research assistant UI.
 
-You will need a NASA ADS API key (free at https://ui.adsabs.harvard.edu/user/settings/token)
-and an Anthropic API key (https://console.anthropic.com).
+You will need a NASA ADS API key (free at <https://ui.adsabs.harvard.edu/user/settings/token>)
+and an Anthropic API key (<https://console.anthropic.com>).
 
 ### Manual setup
 
