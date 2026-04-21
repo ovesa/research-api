@@ -68,6 +68,8 @@ extraction_tool_schema = {
             "open_questions",
             "researcher_summary",
             "extraction_notes",
+            "confidence",
+            "data_gaps",
         ],
         "properties": {
             "central_contribution": {
@@ -269,6 +271,28 @@ extraction_tool_schema = {
                 "type": "string",
                 "description": "Any ambiguity or limitation in this extraction, e.g. 'Abstract too brief to extract meaningful metadata.' Empty string if extraction is clear.",
             },
+            "confidence": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": (
+                    "How confident are you in the quality of this extraction overall. "
+                    "low = abstract is very short, missing key fields, or ambiguous; "
+                    "medium = abstract is adequate but some fields are uncertain; "
+                    "high = abstract is detailed and all required fields are clearly populated."
+                ),
+            },
+            "data_gaps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Limitations or missing data the authors themselves identify, "
+                    "e.g. 'only covers low m modes', 'limited to cycle 24', "
+                    "'no magnetic field effects included'. "
+                    "Different from open_questions — data_gaps are about what the "
+                    "study could not measure or include, not future research directions. "
+                    "Do not invent. Empty list if none mentioned."
+                ),
+            },
         },
     },
 }
@@ -365,14 +389,16 @@ async def save_extraction(
                 extraction_notes,
                 raw_response,
                 extracted_at,
-                prompt_version
+                prompt_version,
+                confidence,
+                data_gaps
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-                $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                $31, $32, $33, $34, $35, $36, $37
-            )
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+    $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+    $31, $32, $33, $34, $35, $36, $37, $38, $39
+)
             ON CONFLICT (identifier) DO UPDATE SET
                 central_contribution = EXCLUDED.central_contribution,
                 relevance_to_solar_inertial_modes = EXCLUDED.relevance_to_solar_inertial_modes,
@@ -409,7 +435,9 @@ async def save_extraction(
                 extraction_notes = EXCLUDED.extraction_notes,
                 raw_response = EXCLUDED.raw_response,
                 extracted_at = EXCLUDED.extracted_at,
-                prompt_version = EXCLUDED.prompt_version
+                prompt_version = EXCLUDED.prompt_version,
+                confidence = EXCLUDED.confidence,
+                data_gaps = EXCLUDED.data_gaps
             """,
             identifier,
             result.get("central_contribution"),
@@ -448,6 +476,8 @@ async def save_extraction(
             raw_response,
             datetime.now(timezone.utc),
             prompt_version,
+            result.get("confidence"),
+            json.dumps(result.get("data_gaps", [])),
         )
 
 
@@ -537,8 +567,8 @@ async def extract_abstract(
 
 
 def _get_api_key() -> str:
-    """Returns the Anthropic API key from application settings. Imported lazily 
-    inside the function to avoid a circular import between config and services 
+    """Returns the Anthropic API key from application settings. Imported lazily
+    inside the function to avoid a circular import between config and services
     at module load time.
 
     Returns:

@@ -678,6 +678,8 @@ async def extract_paper(request: Request, identifier: str):
         "extracted_at": datetime.now(timezone.utc).isoformat(),
         "prompt_version": extraction_prompt_version,
         "cached": False,
+        "confidence": result.get("confidence"),
+        "data_gaps": result.get("data_gaps", []),
     }
 
 
