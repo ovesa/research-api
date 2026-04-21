@@ -456,6 +456,9 @@ async def ingest_from_ads(
             await save_paper(paper)
             result.newly_ingested += 1
             result.arxiv_ids.append(bibcode)
+            
+            from app.services.citations import fetch_and_save_references
+            await fetch_and_save_references(bibcode)
             log.info("ads_ingestion_saved", bibcode=bibcode, title=paper.title)
 
             # ADS rate limit
@@ -556,6 +559,9 @@ async def ingest_latest_heliophysics(
             result.arxiv_ids.append(arxiv_id)
             log.info("ingestion_saved", arxiv_id=arxiv_id, title=paper.title)
 
+            from app.services.citations import fetch_and_save_references
+            await fetch_and_save_references(arxiv_id)
+
             # Respect arXiv rate limit: max 4 requests per second
             await asyncio.sleep(0.25)
 
@@ -628,6 +634,9 @@ async def _process_arxiv_ids(
             result.newly_ingested += 1
             result.arxiv_ids.append(arxiv_id)
             log.info("ingestion_saved", arxiv_id=arxiv_id, title=paper.title)
+
+            from app.services.citations import fetch_and_save_references
+            await fetch_and_save_references(arxiv_id)
 
             await asyncio.sleep(0.25)
 
