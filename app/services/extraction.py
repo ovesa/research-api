@@ -8,6 +8,7 @@ from app.services.database import get_pool
 
 logger = structlog.get_logger(__name__)
 
+extraction_prompt_version = "v1"
 
 async def get_extraction(identifier: str) -> dict | None:
     """Return cached extraction for a paper, or None if not yet extracted.
@@ -29,13 +30,14 @@ async def get_extraction(identifier: str) -> dict | None:
     return dict(row)
 
 
-async def save_extraction(identifier: str, result: dict, raw_response: str) -> None:
+async def save_extraction(identifier: str, result: dict, raw_response: str, prompt_version: str = "v1") -> None:
     """Save an extraction result to Postgres.
 
     Args:
         identifier (str): ADS bibcode or arXiv ID of the paper.
         result (dict): Structured extraction from Claude.
         raw_response (str): Raw Claude response for debugging.
+        prompt_version (str): Version of the prompt used for extraction.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -83,7 +85,7 @@ async def save_extraction(identifier: str, result: dict, raw_response: str) -> N
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                 $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                $31, $32, $33, $34, $35, $36
+                $31, $32, $33, $34, $35, $36, $37
             )
             ON CONFLICT (identifier) DO UPDATE SET
                 central_contribution = EXCLUDED.central_contribution,
@@ -120,7 +122,8 @@ async def save_extraction(identifier: str, result: dict, raw_response: str) -> N
                 researcher_summary = EXCLUDED.researcher_summary,
                 extraction_notes = EXCLUDED.extraction_notes,
                 raw_response = EXCLUDED.raw_response,
-                extracted_at = EXCLUDED.extracted_at
+                extracted_at = EXCLUDED.extracted_at,
+                prompt_version = EXCLUDED.prompt_version,
             """,
             identifier,
             result.get("central_contribution"),
@@ -158,6 +161,7 @@ async def save_extraction(identifier: str, result: dict, raw_response: str) -> N
             result.get("extraction_notes"),
             raw_response,
             datetime.now(timezone.utc),
+            prompt_version, 
         )
 
 

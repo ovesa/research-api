@@ -610,11 +610,7 @@ async def extract_paper(identifier: str):
     from fastapi import HTTPException
 
     from app.services.database import get_paper
-    from app.services.extraction import (
-        extract_abstract,
-        get_extraction,
-        save_extraction,
-    )
+    from app.services.extraction import extract_abstract, get_extraction, save_extraction, extraction_prompt_version
 
     # Look up paper in Postgres
     paper = await get_paper(identifier)
@@ -639,8 +635,7 @@ async def extract_paper(identifier: str):
     )
 
     # Cache result in Postgres
-    await save_extraction(identifier, result, raw_response)
-
+    await save_extraction(identifier, result, raw_response, extraction_prompt_version)
     return {
         "identifier": identifier,
         "central_contribution": result.get("central_contribution"),
@@ -679,6 +674,7 @@ async def extract_paper(identifier: str):
         "researcher_summary": result.get("researcher_summary"),
         "extraction_notes": result.get("extraction_notes"),
         "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "prompt_version": extraction_prompt_version,
         "cached": False,
     }
 
