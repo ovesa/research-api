@@ -584,13 +584,15 @@ async def ingest_from_ads_endpoint(
     "/{identifier}/extract",
     summary="Extract structured data from a paper abstract using Claude",
 )
-async def extract_paper(identifier: str):
+@limiter.limit("10/minute")
+async def extract_paper(request: Request, identifier: str):
     """Extract structured information from a paper's abstract using Claude.
     Checks if an extraction already exists in Postgres and returns it
     immediately if so. Claude is never called twice for the same paper. If
     no extraction exists, sends the abstract to Claude and caches the result.
 
     Args:
+        request (Request): The FastAPI request object, used for rate limiting.
         identifier (str): ADS bibcode or arXiv ID of the paper.
 
     Returns:
