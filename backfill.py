@@ -327,7 +327,44 @@ def backfill_citations(papers: list[dict], client: httpx.Client, dry_run: bool) 
 
     print_summary("Citations", len(papers), fixed, skipped, dry_run)
 
+def backfill_citation_graph(client: httpx.Client, dry_run: bool) -> None:
+    """Fetch and save citation edges for ADS papers that have none yet.
+    Calls the ADS API for each paper to get its reference list and stores
+    directed edges in the related_papers table.
 
+    Args:
+        client: The shared HTTP client.
+        dry_run: If True, report what would be fetched without saving.
+    """
+    import asyncio
+    from app.services.citations import fetch_and_save_references
+
+    papers = fetch_all_papers(client)
+    ads_papers = [p for p in papers if p.get("identifier_type") == "ads"]
+    print(f"\nChecking citation graph...{len(ads_papers)} ADS papers found...")
+
+    if dry_run:
+        print(f"  [dry run] would fetch references for {len(ads_papers)} papers")
+        return
+
+    async def run_all():
+        total_edges = 0
+        for i, paper in enumerate(ads_papers, 1):
+            identifier = paper["identifier"]
+            print(f"  [{i}/{len(ads_papers)}] {identifier}", end=" ... ", flush=True)
+            edges = await fetch_and_save_references(identifier)
+            total_edges += edges
+            print(f"{edges} edges saved")
+            await asyncio.sleep(0.25)
+        return total_edges
+
+    total_edges = asyncio.run(run_all())
+
+    print("\n── Citation Graph ──────────────────────────────────")
+    print(f"  ADS papers processed : {len(ads_papers)}")
+    print(f"  Total edges saved    : {total_edges}")
+    print("───────────────────────────────────────────────────\n")
+    
 def run_interactive(client: httpx.Client) -> None:
     """Walk the user through backfill choices interactively.
 
@@ -353,10 +390,10 @@ def run_interactive(client: httpx.Client) -> None:
     if target in ("missing_ids", "all"):
         backfill_missing_ids(papers, client, dry_run)
 
-    if target in ("citations", "all"):
-        backfill_citations(papers, client, dry_run)
+    if target in ("citation_graph", "all"):
+        backfill_citation_graph(client, dry_run)
 
-    if target not in ("urls", "missing_ids", "citations", "all"):
+    if target not in ("urls", "missing_ids", "citations", "citation_graph", "all"):
         print(f"Unknown target '{target}'. Choose: urls, missing_ids, citations, all")
         sys.exit(1)
 
@@ -374,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--target",
-        choices=["urls", "missing_ids", "citations", "all"],
+        choices=["urls", "missing_ids", "citations", "citation_graph", "all"],
         help="Which fields to backfill. If omitted, interactive mode is used.",
     )
     parser.add_argument(
@@ -406,6 +443,9 @@ def run_cli(args: argparse.Namespace, client: httpx.Client) -> None:
 
     if args.target in ("citations", "all"):
         backfill_citations(papers, client, args.dry_run)
+        
+    if args.target in ("citation_graph", "all"):
+        backfill_citation_graph(client, args.dry_run)
 
 
 if __name__ == "__main__":
