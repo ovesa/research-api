@@ -28,9 +28,8 @@ from a working system.
   confidence scores, and more across 35+ fields per paper
 - Ask plain English questions about the collection and get a detailed researcher level
   synthesis citing specific papers by author and year
-- Explore citation relationships — find the papers your collection cites most, browse
-  the reference list for any paper, and discover which foundational papers you haven't
-  ingested yet
+- Explore citation relationships ro find the papers cited the most most, browse
+  the reference list for any paper, and discover which foundational papers not ingested yet
 - Export the collection to BibTeX fetched directly from NASA ADS, with keyword and
   relevance filtering, ready to drop into a LaTeX document
 - Three layer caching so repeated lookups are fast without hammering external APIs
