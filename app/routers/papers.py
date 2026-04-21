@@ -777,3 +777,86 @@ async def update_paper(identifier: str, request: PaperPatchRequest):
 
     return updated
 
+
+@router.get(
+    "/graph/most-cited",
+    summary="Most cited papers within your collection",
+)
+async def most_cited_in_collection(
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """Return papers most frequently cited by other papers in your database.
+    These are the foundational papers in your collection. Nnes cited many
+    times by other papers you have ingested. Useful for identifying the core
+    literature in your research area.
+
+    Args:
+        limit: Number of top papers to return. Between 1 and 50.
+
+    Returns:
+        List of papers with an internal_citation_count field showing how
+            many papers in your database cite each one.
+    """
+    from app.services.citations import get_most_cited_in_collection
+
+    return await get_most_cited_in_collection(limit)
+
+
+@router.get(
+    "/{identifier}/references",
+    summary="Get papers this paper cites",
+)
+async def get_paper_references(
+    identifier: str,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Return papers in your database that this paper cites. Only papers 
+    already in your collection are returned. Papers cited by this one that 
+    have not been ingested yet will not appear here.
+
+    Args:
+        identifier: ADS bibcode or arXiv ID of the paper.
+    
+        limit: Maximum number of references to return. Between 1 and 100.
+
+    Returns:
+        Dict with identifier, references list, and count.
+    """
+    from app.services.citations import get_references
+
+    refs = await get_references(identifier, limit)
+    return {
+        "identifier": identifier,
+        "references": refs,
+        "count": len(refs),
+    }
+
+
+@router.get(
+    "/{identifier}/citations",
+    summary="Get papers in your database that cite this paper",
+)
+async def get_paper_citations(
+    identifier: str,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Return papers in your database that cite this paper. Only returns 
+    papers already in your collection. Papers that cite this one but have
+    not been ingested yet will not appear here.
+
+    Args:
+        identifier: ADS bibcode or arXiv ID of the paper.
+    
+        limit: Maximum number of citing papers to return. Between 1 and 100.
+
+    Returns:
+        Dict with identifier, citations list, and count.
+    """
+    from app.services.citations import get_citations
+
+    cites = await get_citations(identifier, limit)
+    return {
+        "identifier": identifier,
+        "citations": cites,
+        "count": len(cites),
+    }
