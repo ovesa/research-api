@@ -8,7 +8,271 @@ from app.services.database import get_pool
 
 logger = structlog.get_logger(__name__)
 
-extraction_prompt_version = "v1"
+extraction_prompt_version = "v2"
+
+# Added field-level hallucination guards for the riskiest fields.
+system_prompt = """You are a precise scientific metadata extractor specialising in heliophysics.
+
+You have technical domain knowledge of: helioseismology, MHD theory, solar dynamo, inertial modes,
+Rossby waves, and instruments including SDO, GONG, and MDI. You are familiar with the work of Gizon, 
+Löptien, Hanasoge, Dikpati, Proxauf, and Hathaway.
+
+Your job is extraction, not interpretation. You report only what the abstract explicitly states.
+You do not infer, generalise, or fill gaps from your domain knowledge. When information is absent, 
+return [] for list fields and "" for string fields AND never a guess.
+
+FIELD RULES - where hallucination risk is highest:
+
+instruments: Only list instruments the abstract explicitly names. "Solar observations" without
+a named instrument, return []. Do not infer SDO or MDI from context. They must be stated. HMI is an
+instrument on SDO, so "SDO/HMI" or "Helioseismic and Magnetic Imager" counts as HMI. "SDO" alone 
+does not. 
+
+azimuthal_orders: If applicable, mention the m values used in the abstract. Do not infer azimuthal 
+order from the wave type or method described. For example, if the abstract says "we study equatorial 
+Rossby waves but does not mention m values, return [] for this field. If the abstract says "we analyze 
+modes with m=1 and m=6  to m=10", return ["m=1", "m=6 to m=10"]. A range such as "3<=m<=10" is okay. 
+Even the usage of high vs low m counts  as a mention, but return as ["high m"] or ["low m"].
+
+numerical_values: Only extract numbers explicitly stated with units in the abstract. Do not convert, 
+approximate, or derive values.
+
+confirms_previous_work / contradicts_previous_work: Only populate if the abstract explicitly names a 
+prior paper or author. Do not infer agreement from similar methodology.
+
+EXTRACTION vs INTERPRETATION:
+All fields except researcher_summary and extraction_notes are EXTRACTION fields — report only what is
+explicitly stated, no inference allowed. researcher_summary and extraction_notes are INTERPRETATION fields 
+— for these two only, you may draw on domain expertise. Clearly distinguish what the paper claims vs 
+your assessment.
+
+THIN ABSTRACTS:
+If the abstract is very short or uninformative, return mostly empty fields and note this in extraction_notes. 
+A sparse extraction of a thin abstract is correct. Never invent details to fill the schema."""
+
+# Result arrives as a Python dict
+# Claude is forced through this typed schema and cannot drift into prose.
+extraction_tool_schema = {
+    "name": "extract_paper_metadata",
+    "description": "Extract structured scientific metadata from a heliophysics paper abstract.",
+    "input_schema": {
+        "type": "object",
+        "required": [
+            "central_contribution",
+            "relevance_to_solar_inertial_modes",
+            "data_type",
+            "methods",
+            "key_findings",
+            "instruments",
+            "wave_types",
+            "open_questions",
+            "researcher_summary",
+            "extraction_notes",
+        ],
+        "properties": {
+            "central_contribution": {
+                "type": "string",
+                "description": "One sentence summarising the paper's main contribution to the field.",
+            },
+            "relevance_to_solar_inertial_modes": {
+                "type": "string",
+                "enum": ["primary", "secondary", "peripheral"],
+                "description": (
+                    "primary = inertial modes, Rossby waves, high-latitude inertial modes are the main subject; "
+                    "secondary = related solar dynamics that directly informs inertial mode research; "
+                    "peripheral = mentions inertial modes briefly but is primarily about something else."
+                ),
+            },
+            "data_type": {
+                "type": "string",
+                "enum": [
+                    "observational",
+                    "theoretical",
+                    "computational",
+                    "review",
+                    "mixed",
+                ],
+            },
+            "methods": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific methods or techniques used, e.g. ring diagram analysis, time distance analysis, mode coupling.",
+            },
+            "key_findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "finding": {"type": "string"},
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "detection",
+                                "measurement",
+                                "constraint",
+                                "theoretical",
+                                "null_result",
+                            ],
+                        },
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["definitive", "tentative", "marginal"],
+                        },
+                    },
+                    "required": ["finding", "type", "confidence"],
+                },
+            },
+            "instruments": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Instruments explicitly named in the abstract. Do not infer.",
+            },
+            "wave_types": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Wave or mode types studied, e.g. equatorial Rossby waves, high-latitude inertial modes.",
+            },
+            "solar_region": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Solar regions studied, e.g. convection zone, tachocline, photosphere.",
+            },
+            "azimuthal_orders": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "m values stated numerically in the abstract. Do not infer from wave type.",
+            },
+            "physical_parameters": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Physical quantities studied, e.g. differential rotation, meridional flow, eigenfrequency.",
+            },
+            "measured_quantities": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Quantities directly measured from data, e.g. mode frequency, phase velocity.",
+            },
+            "constrained_quantities": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Quantities inferred or constrained by results, e.g. superadiabaticity, turbulent viscosity.",
+            },
+            "theoretical_framework": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Physical models used, e.g. shallow water model, MHD, quasi-geostrophic theory.",
+            },
+            "detection_method": {
+                "type": "string",
+                "description": "How modes were detected, e.g. ring diagram analysis, power spectrum analysis. Empty string if not applicable.",
+            },
+            "observational_technique": {
+                "type": "string",
+                "enum": [
+                    "helioseismology",
+                    "spectroscopy",
+                    "imaging",
+                    "magnetogram",
+                    "dopplergram",
+                    "simulation_only",
+                    "not_applicable",
+                ],
+            },
+            "depth_range": {
+                "type": "string",
+                "description": "Depth range studied if mentioned, e.g. 0-30 Mm. Empty string if not mentioned.",
+            },
+            "radial_order": {
+                "type": "string",
+                "description": "Radial order n if mentioned, e.g. n=0, n=1. Empty string if not mentioned.",
+            },
+            "dispersion_relation_discussed": {
+                "type": "string",
+                "enum": ["yes", "no"],
+            },
+            "eigenfunction_computed": {
+                "type": "string",
+                "enum": ["yes", "no"],
+            },
+            "mode_identification_method": {
+                "type": "string",
+                "description": "How modes are identified, e.g. frequency matching, power spectrum peaks. Empty string if not applicable.",
+            },
+            "numerical_values": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "quantity": {"type": "string"},
+                        "value": {"type": "string"},
+                        "unit": {"type": "string"},
+                    },
+                    "required": ["quantity", "value", "unit"],
+                },
+                "description": "Only numbers explicitly stated with units in the abstract. Do not derive.",
+            },
+            "solar_cycle_phase": {
+                "type": "string",
+                "description": "Solar cycle context if mentioned, e.g. solar minimum, cycle 24, SC24. Empty string if not mentioned.",
+            },
+            "cycle_dependence": {
+                "type": "string",
+                "enum": ["yes", "no", "partial", "not_mentioned"],
+            },
+            "solar_activity_level": {
+                "type": "string",
+                "enum": [
+                    "solar_minimum",
+                    "solar_maximum",
+                    "rising_phase",
+                    "declining_phase",
+                    "multiple_cycles",
+                    "not_mentioned",
+                ],
+            },
+            "magnetic_field_considered": {
+                "type": "string",
+                "enum": ["yes", "no"],
+            },
+            "time_period": {
+                "type": "string",
+                "description": "Observational time range if mentioned, e.g. 2010-2024 or 14 years. Empty string if not mentioned.",
+            },
+            "agrees_with_theory": {
+                "type": "string",
+                "enum": ["yes", "no", "partial", "not_applicable"],
+            },
+            "theoretical_prediction_tested": {
+                "type": "string",
+                "description": "Which theoretical prediction was tested, e.g. shallow water model. Empty string if not applicable.",
+            },
+            "confirms_previous_work": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Only populate if the abstract explicitly names a prior paper or author it confirms.",
+            },
+            "contradicts_previous_work": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Only populate if the abstract explicitly names a prior paper or author it disputes.",
+            },
+            "open_questions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Unresolved questions the authors themselves flag, e.g. 'remains unclear', 'future observations needed'. Do not invent.",
+            },
+            "researcher_summary": {
+                "type": "string",
+                "description": "2-3 sentences on why this paper matters for solar inertial mode research, what gap it fills, and what a researcher should take away. This is an interpretation field — domain expertise welcome here.",
+            },
+            "extraction_notes": {
+                "type": "string",
+                "description": "Any ambiguity or limitation in this extraction, e.g. 'Abstract too brief to extract meaningful metadata.' Empty string if extraction is clear.",
+            },
+        },
+    },
+}
+
 
 async def get_extraction(identifier: str) -> dict | None:
     """Return cached extraction for a paper, or None if not yet extracted.
@@ -30,14 +294,35 @@ async def get_extraction(identifier: str) -> dict | None:
     return dict(row)
 
 
-async def save_extraction(identifier: str, result: dict, raw_response: str, prompt_version: str = "v1") -> None:
-    """Save an extraction result to Postgres.
+async def save_extraction(
+    identifier: str,
+    result: dict,
+    raw_response: str,
+    prompt_version: str = extraction_prompt_version,
+) -> None:
+    """Saves a Claude extraction result to the extractions table in Postgres.
+    Uses INSERT ... ON CONFLICT DO UPDATE so re-running extraction on the
+    same paper overwrites the old row rather than raising a duplicate key
+    error. If you bump extraction_prompt_version and re-process a paper,
+    the improved result replaces the stale one.
 
     Args:
-        identifier (str): ADS bibcode or arXiv ID of the paper.
-        result (dict): Structured extraction from Claude.
-        raw_response (str): Raw Claude response for debugging.
-        prompt_version (str): Version of the prompt used for extraction.
+        identifier: ADS bibcode or arXiv ID of the paper.
+
+        result: Structured extraction dict returned by extract_abstract().
+                    Keys match the columns of the extractions table exactly.
+
+        raw_response: JSON-serialised extraction result, stored in the
+                        raw_response column for debugging. If an extraction
+                        looks wrong, inspect this column to see exactly what
+                        Claude returned.
+
+        prompt_version: Version string of the prompt that produced this result.
+                            Defaults to extraction_prompt_version so call sites
+                            rarely need to pass it explicitly. Stored in Postgres
+                            so you can find stale rows after a prompt improvement:
+
+                            SELECT identifier FROM extractions WHERE prompt_version = 'v1'.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -79,7 +364,8 @@ async def save_extraction(identifier: str, result: dict, raw_response: str, prom
                 researcher_summary,
                 extraction_notes,
                 raw_response,
-                extracted_at
+                extracted_at,
+                prompt_version
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
@@ -123,7 +409,7 @@ async def save_extraction(identifier: str, result: dict, raw_response: str, prom
                 extraction_notes = EXCLUDED.extraction_notes,
                 raw_response = EXCLUDED.raw_response,
                 extracted_at = EXCLUDED.extracted_at,
-                prompt_version = EXCLUDED.prompt_version,
+                prompt_version = EXCLUDED.prompt_version
             """,
             identifier,
             result.get("central_contribution"),
@@ -161,125 +447,57 @@ async def save_extraction(identifier: str, result: dict, raw_response: str, prom
             result.get("extraction_notes"),
             raw_response,
             datetime.now(timezone.utc),
-            prompt_version, 
+            prompt_version,
         )
 
 
 async def extract_abstract(
     identifier: str, title: str, abstract: str
 ) -> tuple[dict, str]:
-    """Send a paper abstract to Claude and return structured extraction.
+    """Sends a paper abstract to Claude and returns a structured extraction.
+    Uses the tool_use API so Claude is forced through the typed schema defined
+    in extraction_tool_schema. This is more reliable than asking Claude to return
+    JSON as free text because it cannot drift into prose and the result arrives as
+    a Python dict with no parsing needed. The function does not save to Postgres.
+    The caller is responsible for calling save_extraction() with the returned result.
+    This keeps the Claude call and the database write separated and independently
+    testable.
 
     Args:
-        identifier (str): Paper identifier for logging.
-        title (str): Paper title.
-        abstract (str): Paper abstract text.
+        identifier: ADS bibcode or arXiv ID of the paper. Used only for
+                        structured logging. Not sent to Claude.
+
+        title: Full paper title. Injected into the user message inside
+                    <title> XML tags.
+
+        abstract: Full abstract text. Injected into the user message
+                    inside <abstract> XML tags.
 
     Returns:
-        tuple[dict, str]: Parsed extraction dict and raw Claude response.
+
+        A tuple of:
+
+            result: The structured extraction as a Python dict. Keys match the columns
+                        of the extractions table. Returned directly from Claude's
+                        tool_use block. No json.loads needed.
+
+            raw_response: JSON-serialised copy of result as a string, stored in the
+                            raw_response debug column in Postgres. Inspect this column
+                            if an extraction looks wrong.
+
+    Raises:
+
+        httpx.HTTPStatusError: If the Anthropic API returns a non-2xx response, e.g. 401
+                                for a bad API key or 529 for overload.
+
+        StopIteration: If Claude's response contains no tool_use block, which should not
+                        happen when tool_choice forces a specific tool but would surface
+                        here rather than silently returning wrong data.
     """
     log = logger.bind(identifier=identifier)
     log.info("extraction_started")
 
-    prompt = f"""You are Dr. HelioBot, a senior heliophysics researcher with over 30 years \
-experience studying solar interior dynamics, inertial modes, and Rossby waves. You have deep \
-expertise in helioseismology, MHD theory, solar dynamo, and analyzing data from instruments \
-like SDO/HMI, GONG, and MDI. You are intimately familiar with the work of Gizon, Löptien, \
-Hanasoge, Dikpati, Proxauf, Hathaway, and others in this field. You know the difference between \
-equatorial Rossby modes, high-latitude inertial modes, thermal Rossby waves, and columnar \
-convective modes. You have a keen eye for extracting the most relevent information from papers.
-
-Your task is to carefully read this paper and extract structured research metadata that will \
-be used to build a literature database for solar inertial mode research.
-
-First, identify what type of paper this is and what its central contribution is. Then extract \
-the following fields precisely and conservatively based ONLY on information stated in the \
-abstract or title. Never invent information not present in the text.
-
-Title: {title}
-
-Abstract: {abstract}
-
-Return ONLY a valid JSON object. Use empty lists [] for list fields and empty strings "" \
-for string fields when information is not present. Never guess or invent.
-
-{{
-  "central_contribution": "one sentence summarizing the paper's main contribution to the field",
-
-  "relevance_to_solar_inertial_modes": "one of: primary (inertial modes or rossby waves in the Sun are the main subject), secondary (studies related solar dynamics that directly informs inertial mode research), peripheral (mentions inertial modes briefly but is primarily about something else)",
-
-  "data_type": "one of: observational (uses real solar data), theoretical (analytical only), computational (numerical simulations), review (summarizes literature), mixed (combines multiple approaches)",
-
-  "methods": ["specific methods or techniques used"],
-
-  "key_findings": [
-    {{
-      "finding": "description of the finding",
-      "type": "one of: detection, measurement, constraint, theoretical, null_result",
-      "confidence": "one of: definitive, tentative, marginal"
-    }}
-  ],
-
-  "instruments": ["instruments or datasets explicitly mentioned, e.g. SDO, HMI, Solar Dynamics Observatory, Helioseismic and Magnetic Imager, GONG, MDI, Hinode"],
-
-  "wave_types": ["types of waves or modes studied, e.g. inertial modes, equatorial rossby waves, high-latitude inertial modes, thermal rossby waves, columnar convective modes, gravito-inertial waves, g-modes, f-modes, p-modes"],
-
-  "solar_region": ["solar regions studied, e.g. convection zone, tachocline, photosphere, radiative interior, polar region, equatorial region"],
-
-  "azimuthal_orders": ["m values if mentioned, e.g. m=1, m=6 to m=10, empty if not mentioned"],
-
-  "physical_parameters": ["physical quantities studied, e.g. differential rotation, meridional flow, Reynolds stress, eigenfrequency, phase velocity, superadiabaticity"],
-
-  "measured_quantities": ["quantities directly measured from data, e.g. mode frequency, phase velocity, mode lifetime, power spectrum, velocity amplitude, eigenfunction shape"],
-
-  "constrained_quantities": ["quantities inferred or constrained by results, e.g. superadiabaticity, turbulent viscosity, convective velocity, differential rotation profile, meridional flow speed"],
-
-  "theoretical_framework": ["physical models or approaches used, e.g. shallow water model, MHD, linear perturbation theory, anelastic approximation, Boussinesq approximation, quasi-geostrophic theory, normal mode coupling"],
-
-  "detection_method": "how modes or waves were detected or measured, e.g. ring-diagram analysis, time-distance helioseismology, local correlation tracking, Doppler velocity maps, power spectrum analysis, cross-covariance functions, normal mode coupling, empty string if not applicable",
-
-  "observational_technique": "one of: helioseismology, spectroscopy, imaging, magnetogram, dopplergram, photometry, simulation_only, not_applicable",
-
-  "depth_range": "depth range studied if mentioned, e.g. 0-30 Mm, upper convection zone, near surface, full convection zone depth, empty string if not mentioned",
-
-  "radial_order": "radial order n if mentioned, e.g. n=0, n=1, sectoral modes, empty string if not mentioned",
-
-  "dispersion_relation_discussed": "yes or no — whether the paper derives or discusses the dispersion relation of the modes",
-
-  "eigenfunction_computed": "yes or no — whether eigenfunctions are computed or observed",
-
-  "mode_identification_method": "how modes are identified, e.g. frequency matching, eigenfunction comparison, power spectrum peaks, empty string if not applicable",
-
-  "numerical_values": [
-    {{"quantity": "name of quantity", "value": "numeric value", "unit": "unit"}}
-  ],
-
-  "solar_cycle_phase": "solar cycle context if mentioned, e.g. solar minimum, cycle 24, cycles 23-25, empty string if not mentioned",
-
-  "cycle_dependence": "one of: yes, no, partial, not_mentioned",
-
-  "solar_activity_level": "one of: solar_minimum, solar_maximum, rising_phase, declining_phase, multiple_cycles, not_mentioned",
-
-  "magnetic_field_considered": "yes or no — whether magnetic field effects on the modes are discussed",
-
-  "time_period": "observational time range if mentioned, format as YYYY-YYYY or duration e.g. 14 years, empty string if not mentioned",
-
-  "agrees_with_theory": "one of: yes, no, partial, not_applicable — whether observational results agree with theoretical predictions",
-
-  "theoretical_prediction_tested": "which theoretical prediction was tested if any, e.g. Matsuno-Gill model, linear wave theory, gyroscopic pumping, empty string if not applicable",
-
-  "confirms_previous_work": ["previous results this paper confirms or extends, e.g. confirms Löptien et al. 2018 detection"],
-
-  "contradicts_previous_work": ["previous results this paper disputes or revises, empty list if none"],
-
-  "open_questions": ["unresolved questions explicitly identified, including phrases like remains unclear, future observations needed, not yet understood, warrants further study"],
-
-  "researcher_summary": "As a heliophysics expert, write 2-3 sentences explaining why this paper matters for solar inertial mode research, what gap it fills, and what a researcher studying inertial modes should take away from it",
-
-  "extraction_notes": "note any ambiguity or limitation in this extraction, empty string if clear"
-}}
-
-Return only the JSON object. No explanation before or after. No markdown. No code blocks."""
+    user_message = f"<title>\n{title}\n</title>\n\n<abstract>\n{abstract}\n</abstract>"
 
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
@@ -292,30 +510,40 @@ Return only the JSON object. No explanation before or after. No markdown. No cod
             json={
                 "model": "claude-sonnet-4-20250514",
                 "max_tokens": 2000,
-                "messages": [{"role": "user", "content": prompt}],
+                "system": system_prompt,
+                "tools": [extraction_tool_schema],
+                "tool_choice": {"type": "tool", "name": "extract_paper_metadata"},
+                "messages": [{"role": "user", "content": user_message}],
             },
         )
 
     response.raise_for_status()
     data = response.json()
-    raw_text = data["content"][0]["text"].strip()
 
-    try:
-        result = json.loads(raw_text)
-    except json.JSONDecodeError:
-        clean = raw_text.replace("```json", "").replace("```", "").strip()
-        result = json.loads(clean)
+    # Find the tool_use block by type rather than assuming position.
+    # tool_choice forces Claude to call the tool so this will always find a match
+    # but next() raises StopIteration rather than returning wrong data if something unexpected comes back.
+    tool_block = next(block for block in data["content"] if block["type"] == "tool_use")
+    result = tool_block["input"]
+
+    raw_response = json.dumps(result)
 
     log.info(
         "extraction_complete",
         data_type=result.get("data_type"),
         relevance=result.get("relevance_to_solar_inertial_modes"),
     )
-    return result, raw_text
+    return result, raw_response
 
 
 def _get_api_key() -> str:
-    """Get the Anthropic API key from settings."""
+    """Returns the Anthropic API key from application settings. Imported lazily 
+    inside the function to avoid a circular import between config and services 
+    at module load time.
+
+    Returns:
+        The Anthropic API key string from app.config.settings.
+    """
     from app.config import settings
 
     return settings.anthropic_api_key
